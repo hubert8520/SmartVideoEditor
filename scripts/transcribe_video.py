@@ -819,6 +819,28 @@ def transcribe_media(
     )
 
 
+
+
+# Phase 2 shared runtime helpers
+#
+# Keep this block close to main() while the file is being migrated. Functions
+# defined above still exist for now, but the names below are rebound to shared
+# package implementations before the CLI runs. This keeps behavior stable while
+# reducing duplication step by step.
+from smart_video_editor.transcription.runtime import (  # noqa: E402
+    ARTIFACTS_DIR as ARTIFACTS_DIR,
+    PROJECT_ROOT as PROJECT_ROOT,
+    RAW_DIR as RAW_DIR,
+    RAW_MEDIA_EXTENSIONS as RAW_MEDIA_EXTENSIONS,
+    RAW_TRANSCRIPTION_PATH as RAW_TRANSCRIPTION_PATH,
+    get_media_duration as get_media_duration,
+    resolve_ffmpeg_executable as resolve_ffmpeg_executable,
+    resolve_raw_media_path as resolve_raw_media_path,
+    seconds_to_timestamp as seconds_to_timestamp,
+    supported_raw_media_files as supported_raw_media_files,
+    timestamp_to_seconds as timestamp_to_seconds,
+)
+
 def main() -> None:
     args = parse_args()
     loaded_env = load_env_file(args.env_file)
