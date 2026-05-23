@@ -2344,6 +2344,34 @@ def run_quality_check(args: argparse.Namespace) -> None:
     print(f"Warning: post-render quality check failed: {message}", file=sys.stderr)
 
 
+
+
+# Phase 3 shared edit runtime helpers
+#
+# Keep this block close to main() while edit_video.py is being migrated. The
+# original definitions remain above for now, but these stable names are rebound
+# to shared package implementations before the CLI runs. This keeps the patch
+# small and reversible.
+from smart_video_editor.editing.runtime import (  # noqa: E402
+    ARTIFACTS_DIR as ARTIFACTS_DIR,
+    DEFAULT_OUTPUT_PATH as DEFAULT_OUTPUT_PATH,
+    EDITED_DIR as EDITED_DIR,
+    EDIT_DECISIONS_PATH as EDIT_DECISIONS_PATH,
+    LLM_EDIT_DECISIONS_PATH as LLM_EDIT_DECISIONS_PATH,
+    PROJECT_ROOT as PROJECT_ROOT,
+    QUALITY_REPORT_PATH as QUALITY_REPORT_PATH,
+    QUALITY_TRANSCRIPT_PATH as QUALITY_TRANSCRIPT_PATH,
+    RAW_DIR as RAW_DIR,
+    RAW_MEDIA_EXTENSIONS as RAW_MEDIA_EXTENSIONS,
+    REPAIR_PLAN_PATH as REPAIR_PLAN_PATH,
+    TRANSCRIPT_CANDIDATES as TRANSCRIPT_CANDIDATES,
+    normalize_text as normalize_text,
+    seconds_to_timestamp as seconds_to_timestamp,
+    strip_accents as strip_accents,
+    timestamp_to_seconds as timestamp_to_seconds,
+    tokenize as tokenize,
+)
+
 def main() -> None:
     start_time = time.time()
     args = parse_args()
