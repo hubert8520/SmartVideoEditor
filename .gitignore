@@ -3,6 +3,9 @@ venv
 .DS_Store
 __pycache__/
 *.pyc
+raw
 raw/
+artifacts
 artifacts/
+edited
 edited/

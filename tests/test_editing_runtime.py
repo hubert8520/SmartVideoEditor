@@ -2,7 +2,7 @@ from smart_video_editor.editing import runtime
 
 
 def test_editing_runtime_paths():
-    assert runtime.PROJECT_ROOT.name == "SmartVideoEditor"
+    assert (runtime.PROJECT_ROOT / "scripts" / "edit_video.py").exists()
     assert runtime.RAW_DIR == runtime.PROJECT_ROOT / "raw"
     assert runtime.EDITED_DIR == runtime.PROJECT_ROOT / "edited"
     assert runtime.ARTIFACTS_DIR == runtime.PROJECT_ROOT / "artifacts"

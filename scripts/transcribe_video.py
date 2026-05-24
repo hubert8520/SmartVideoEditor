@@ -26,6 +26,8 @@ OPENAI_COARSE_TRANSCRIPTION_MODELS = {
 }
 MAX_UPLOAD_BYTES = 24 * 1024 * 1024
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 RAW_DIR = PROJECT_ROOT / "raw"
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 RAW_TRANSCRIPTION_PATH = ARTIFACTS_DIR / "raw_transcription.json"
