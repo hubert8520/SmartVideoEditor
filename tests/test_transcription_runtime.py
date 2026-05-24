@@ -2,7 +2,7 @@ from smart_video_editor.transcription import runtime
 
 
 def test_runtime_exports_project_paths():
-    assert runtime.PROJECT_ROOT.name == "SmartVideoEditor"
+    assert (runtime.PROJECT_ROOT / "scripts" / "transcribe_video.py").exists()
     assert runtime.RAW_DIR == runtime.PROJECT_ROOT / "raw"
     assert runtime.ARTIFACTS_DIR == runtime.PROJECT_ROOT / "artifacts"
 
