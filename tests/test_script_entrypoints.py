@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from smart_video_editor.cli import edit_video as edit_video_cli
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATHS = [
@@ -31,3 +33,15 @@ def test_script_help_imports_package_from_repo_root():
 def test_py_compile_all_cli_scripts():
     for script in SCRIPT_PATHS:
         py_compile.compile(str(script), doraise=True)
+
+
+def test_edit_video_cli_uses_extracted_modules():
+    assert edit_video_cli.detect_silences.__module__ == "smart_video_editor.media.rendering"
+    assert edit_video_cli.render_video.__module__ == "smart_video_editor.media.rendering"
+    assert edit_video_cli.write_decisions.__module__ == "smart_video_editor.editing.decisions_io"
+    assert edit_video_cli.run_quality_check.__module__ == "smart_video_editor.editing.quality"
+
+
+def test_edit_video_script_is_thin_wrapper():
+    script = PROJECT_ROOT / "scripts" / "edit_video.py"
+    assert len(script.read_text(encoding="utf-8").splitlines()) < 80
