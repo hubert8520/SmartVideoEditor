@@ -248,7 +248,9 @@ Ten skrypt:
 - transkrybuje `edited/edited_video.mp4`, domyślnie Deepgramem,
 - zapisuje `artifacts/edited_transcription.json`,
 - wysyła finalną transkrypcję do LLM,
-- zapisuje raport w `artifacts/final_quality_report.json`.
+- zapisuje raport w `artifacts/final_quality_report.json`,
+- mapuje każdy problem z czasu finalnego filmu na `raw_ranges` z `timeline_map`,
+- dodaje `repair_suggestion` (`force_keep`, `force_drop`, `manual_review` albo `no_auto_repair`) i `actionability`.
 
 Raport wykrywa m.in. urwane słowa, niepotrzebne powtórzenia, zawieszone myśli i nielogiczne przejścia.
 
@@ -291,6 +293,8 @@ Naprawy są konserwatywne:
 - `force_keep_interval` - przywraca krótki fragment audio między słowami, gdy QA wykryje brakujący łącznik,
 - `force_keep_words` - poszerza keep dla słowa rozpoznanego w raw, ale zgubionego w finalnej transkrypcji.
 
+Repair planner wykonuje tylko jawne akcje z raportu QA. Jeśli QA oznaczy miejsce jako `manual_review`, albo jeśli `force_drop` nie ma wysokiej pewności i mapowania na raw, plan naprawy zostawia to do ręcznego sprawdzenia.
+
 ## 9. Brief dla montażysty
 
 JSON-y są dla skryptów. Dla osoby montującej wygeneruj prosty brief:
@@ -313,9 +317,14 @@ Brief zawiera:
 
 - czas problemu w filmie edytowanym,
 - odpowiadający czas w raw,
+- akcję QA i status naprawy (`auto_repair_candidate`, `manual_review` albo blokada braku mapowania),
+- pewność QA i uzasadnienie,
+- kontekst słów z raw wokół problemu,
 - opis co brzmi podejrzanie,
 - sugestię co sprawdzić/poprawić,
 - krótkie klipy porównawcze edit/raw, jeśli użyjesz `--make-clips`.
+
+Więcej o polach briefu: `docs/editor_review_reports.md`.
 
 ## 10. Typowy workflow
 
