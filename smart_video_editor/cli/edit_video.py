@@ -815,6 +815,12 @@ def load_llm_decisions(
         reason = str(item.get("reason", "LLM drop range")).strip() or "LLM drop range"
         category = str(item.get("reason_category", "other")).strip() or "other"
         affected_text = str(item.get("affected_text", "")).strip()
+        candidate_ids = item.get("candidate_ids", [])
+        if not isinstance(candidate_ids, list):
+            candidate_ids = []
+        cut_risk = str(item.get("cut_risk", "low")).strip() or "low"
+        preserves_meaning = item.get("preserves_meaning", True)
+        safety_basis = str(item.get("safety_basis", "")).strip()
 
         word_ids: list[int] = []
         if "start_word_id" in item and "end_word_id" in item and words_by_id:
@@ -845,10 +851,18 @@ def load_llm_decisions(
             "reason_category": category,
             "reason": reason,
             "affected_text": affected_text,
+            "candidate_ids": candidate_ids,
+            "cut_risk": cut_risk,
+            "preserves_meaning": preserves_meaning,
+            "safety_basis": safety_basis,
         }
 
         if end <= start:
             record["skip_reason"] = "empty_or_invalid_range"
+            summary.skipped_drop_ranges.append(record)
+            continue
+        if cut_risk != "low" or preserves_meaning is False:
+            record["skip_reason"] = "unsafe_llm_drop_contract"
             summary.skipped_drop_ranges.append(record)
             continue
         if confidence < min_confidence:
@@ -881,6 +895,9 @@ def load_llm_decisions(
                 "reason": str(item.get("reason", "")),
                 "affected_text": str(item.get("affected_text", "")),
                 "question": str(item.get("question", "")),
+                "candidate_ids": item.get("candidate_ids", []),
+                "uncertainty_reason": str(item.get("uncertainty_reason", "")),
+                "suggested_action": str(item.get("suggested_action", "")),
             }
         )
 
