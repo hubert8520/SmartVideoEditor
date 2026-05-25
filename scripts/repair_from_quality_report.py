@@ -7,6 +7,7 @@ import argparse
 import difflib
 import json
 import re
+import sys
 import unicodedata
 from collections import Counter
 from pathlib import Path
@@ -14,6 +15,12 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from smart_video_editor.reporting.quality import normalize_repair_suggestion  # noqa: E402
+from smart_video_editor.reporting.timeline import raw_range_tuples  # noqa: E402
+
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 DEFAULT_QUALITY_REPORT = ARTIFACTS_DIR / "final_quality_report.json"
 DEFAULT_EDIT_DECISIONS = ARTIFACTS_DIR / "edit_decisions.json"
@@ -34,6 +41,21 @@ COMMON_SHORT_TOKENS = {
     "takie",
     "tego",
     "to",
+    "wiec",
+    "więc",
+    "zeby",
+    "żeby",
+}
+AUTO_DROP_CATEGORIES = {"repetition", "off_topic", "noise_or_setup"}
+AUTO_KEEP_CATEGORIES = {"cut_word", "dangling_thought", "logic_gap"}
+CONNECTOR_TOKENS = {
+    "ale",
+    "bo",
+    "czyli",
+    "dlatego",
+    "natomiast",
+    "poniewaz",
+    "ponieważ",
     "wiec",
     "więc",
     "zeby",
@@ -252,6 +274,54 @@ def source_issue_summary(issue: dict[str, Any], raw_ranges: list[tuple[float, fl
             }
             for start, end, timeline_id in raw_ranges
         ],
+        "repair_suggestion": normalize_repair_suggestion(issue),
+    }
+
+
+def raw_ranges_for_issue(
+    issue: dict[str, Any],
+    final_start: float,
+    final_end: float,
+    timeline: list[dict[str, Any]],
+) -> list[tuple[float, float, int]]:
+    embedded = issue.get("raw_ranges")
+    if isinstance(embedded, list) and embedded:
+        tuples = raw_range_tuples([item for item in embedded if isinstance(item, dict)])
+        if tuples:
+            return tuples
+    return map_final_range_to_raw_ranges(final_start, final_end, timeline)
+
+
+def repair_action_skip_reason(category: str, suggestion: dict[str, Any]) -> str | None:
+    action = str(suggestion.get("action", "manual_review"))
+    confidence = str(suggestion.get("confidence", "low"))
+    if action == "manual_review":
+        return "qa_requested_manual_review"
+    if action == "no_auto_repair":
+        return "qa_requested_no_auto_repair"
+    if action == "force_drop":
+        if category not in AUTO_DROP_CATEGORIES:
+            return "inconsistent_qa_repair_action"
+        if confidence != "high":
+            return "force_drop_requires_high_confidence"
+        return None
+    if action == "force_keep":
+        if category not in AUTO_KEEP_CATEGORIES:
+            return "inconsistent_qa_repair_action"
+        return None
+    return "unsupported_qa_repair_action"
+
+
+def skip_record(
+    issue_index: int,
+    skip_reason: str,
+    issue: dict[str, Any],
+    raw_ranges: list[tuple[float, float, int]],
+) -> dict[str, Any]:
+    return {
+        "issue_index": issue_index,
+        "skip_reason": skip_reason,
+        "issue": source_issue_summary(issue, raw_ranges),
     }
 
 
@@ -269,6 +339,7 @@ def make_force_drop_operation(
         "reason": reason,
         "affected_text": str(issue.get("affected_text", "")),
         "source_issue": source_issue_summary(issue, raw_ranges),
+        "repair_action": "force_drop",
     }
 
 
@@ -287,6 +358,7 @@ def make_force_keep_words_operation(
         "padding": padding,
         "reason": reason,
         "source_issue": source_issue_summary(issue, raw_ranges),
+        "repair_action": "force_keep",
     }
 
 
@@ -309,6 +381,7 @@ def make_force_keep_interval_operation(
         "after_word_id": after_word_id,
         "reason": reason,
         "source_issue": source_issue_summary(issue, raw_ranges),
+        "repair_action": "force_keep",
     }
 
 
@@ -504,6 +577,37 @@ def dangling_bridge_tail_repair(
     return None
 
 
+def direct_drop_repair(
+    issue: dict[str, Any],
+    issue_words: list[dict[str, Any]],
+    raw_ranges: list[tuple[float, float, int]],
+) -> dict[str, Any] | None:
+    if not issue_words:
+        return None
+    if len(issue_words) > 12:
+        return None
+
+    tokens = [raw_word_token(word) for word in issue_words]
+    if any(token in CONNECTOR_TOKENS for token in tokens):
+        return None
+
+    start = min(word_start(word) for word in issue_words)
+    end = max(word_end(word) for word in issue_words)
+    if end - start > 2.5:
+        return None
+
+    return make_force_drop_operation(
+        int(issue_words[0]["id"]),
+        int(issue_words[-1]["id"]),
+        (
+            "QA requested a high-confidence force_drop for a short off-topic/noise "
+            "range mapped back to raw words."
+        ),
+        issue,
+        raw_ranges,
+    )
+
+
 def repair_key(repair: dict[str, Any]) -> tuple[Any, ...]:
     repair_type = repair.get("type")
     if repair_type in {"force_drop_words", "force_keep_words"}:
@@ -531,29 +635,33 @@ def main() -> None:
     repairs: list[dict[str, Any]] = []
     skipped_issues: list[dict[str, Any]] = []
     mapped_issues: list[dict[str, Any]] = []
+    manual_review_issues: list[dict[str, Any]] = []
 
     for issue_index, issue in enumerate(quality_report.get("issues", [])):
         severity = str(issue.get("severity", "low"))
         category = str(issue.get("issue_category", "other"))
+        suggestion = normalize_repair_suggestion(issue)
         final_start = timestamp_to_seconds(str(issue.get("start", "00:00:00:000")))
         final_end = timestamp_to_seconds(str(issue.get("end", "00:00:00:000")))
-        raw_ranges = map_final_range_to_raw_ranges(final_start, final_end, timeline)
+        raw_ranges = raw_ranges_for_issue(issue, final_start, final_end, timeline)
         issue_words = words_in_ranges(raw_words, raw_ranges, center_only=True)
         context_words = words_in_ranges(raw_words, raw_ranges, context=0.65)
         mapped_issues.append(source_issue_summary(issue, raw_ranges))
 
         if SEVERITY_RANK.get(severity, 1) < min_rank:
-            skipped_issues.append(
-                {
-                    "issue_index": issue_index,
-                    "skip_reason": f"severity_below_{args.min_severity}",
-                    "issue": source_issue_summary(issue, raw_ranges),
-                }
-            )
+            skipped_issues.append(skip_record(issue_index, f"severity_below_{args.min_severity}", issue, raw_ranges))
+            continue
+
+        action_skip_reason = repair_action_skip_reason(category, suggestion)
+        if action_skip_reason:
+            record = skip_record(issue_index, action_skip_reason, issue, raw_ranges)
+            skipped_issues.append(record)
+            if action_skip_reason in {"qa_requested_manual_review", "qa_requested_no_auto_repair"}:
+                manual_review_issues.append(record)
             continue
 
         issue_repairs: list[dict[str, Any]] = []
-        if category == "repetition":
+        if category == "repetition" and suggestion["action"] == "force_drop":
             blocked_drop = find_blocked_repair_drop(context_words, blocked_windows)
             repeated_drop = blocked_drop or find_repeated_phrase_drop(context_words)
             if repeated_drop:
@@ -561,13 +669,18 @@ def main() -> None:
                     make_force_drop_operation(
                         repeated_drop[0],
                         repeated_drop[1],
-                        "QA confirmed repetition; override previous safety block for this exact repeated range.",
+                        "QA requested high-confidence force_drop for this exact repeated raw range.",
                         issue,
                         raw_ranges,
                     )
                 )
 
-        if category in {"cut_word", "dangling_thought", "logic_gap"}:
+        if category in {"off_topic", "noise_or_setup"} and suggestion["action"] == "force_drop":
+            direct_drop = direct_drop_repair(issue, issue_words, raw_ranges)
+            if direct_drop:
+                issue_repairs.append(direct_drop)
+
+        if category in {"cut_word", "dangling_thought", "logic_gap"} and suggestion["action"] == "force_keep":
             bridge_repair = dangling_bridge_tail_repair(issue, context_words, raw_ranges)
             if bridge_repair:
                 issue_repairs.append(bridge_repair)
@@ -593,13 +706,7 @@ def main() -> None:
         if issue_repairs:
             repairs.extend(issue_repairs)
         else:
-            skipped_issues.append(
-                {
-                    "issue_index": issue_index,
-                    "skip_reason": "no_conservative_auto_repair",
-                    "issue": source_issue_summary(issue, raw_ranges),
-                }
-            )
+            skipped_issues.append(skip_record(issue_index, "no_conservative_auto_repair", issue, raw_ranges))
 
     deduped_repairs: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
@@ -618,13 +725,15 @@ def main() -> None:
         "source_edit_decisions": str(args.edit_decisions),
         "source_raw_transcript": str(args.raw_transcript),
         "source_edited_transcript": str(args.edited_transcript),
+        "render_source_policy": "repair renders from the original raw video through edit_video.py --repair-plan",
         "repairs": deduped_repairs,
         "skipped_issues": skipped_issues,
+        "manual_review_issues": manual_review_issues,
         "mapped_issues": mapped_issues,
         "notes": (
-            "This plan is conservative. It only forces repeated-range drops already "
-            "confirmed by QA, keeps raw words that QA appears to miss, and restores "
-            "short raw gaps that may contain unrecognized connectors."
+            "This plan is conservative. It only auto-applies actionable QA suggestions "
+            "with raw_ranges: high-confidence force_drop for exact short ranges, "
+            "force_keep for missing words/connectors, and short raw gap restoration."
         ),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -632,6 +741,7 @@ def main() -> None:
     print(f"Repair plan saved to: {args.output}")
     print(f"Repairs: {len(deduped_repairs)}")
     print(f"Skipped issues: {len(skipped_issues)}")
+    print(f"Manual review issues: {len(manual_review_issues)}")
 
 
 if __name__ == "__main__":

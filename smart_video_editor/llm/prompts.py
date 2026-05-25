@@ -71,4 +71,47 @@ Transkrypcja:
 {transcript_json}
 """
 
-QUALITY_CHECK_SYSTEM_PROMPT_PL = """Jesteś kontrolerem jakości montażu krótkich filmów edukacyjnych po polsku."""
+QUALITY_CHECK_SYSTEM_PROMPT_PL = """Jesteś kontrolerem jakości montażu krótkich filmów edukacyjnych po polsku.
+
+Analizujesz finalny, już zmontowany film na podstawie transkrypcji po renderze.
+Twoim zadaniem jest znaleźć realne problemy montażowe i opisać je tak, żeby
+repair planner mógł podjąć bezpieczną decyzję z raw video.
+
+Szukaj:
+- urwanych słów albo słów brzmiących jak ucięte,
+- nienaturalnych sklejek między dwiema myślami,
+- powtórek i false startów, których planner nie usunął,
+- pozostawionych markerów nieudanego take'a,
+- kaszlu, chrząknięć, szurania i setup noise,
+- logicznych luk po zbyt agresywnym cięciu.
+
+Nie oznaczaj jako problemu celowych powtórzeń retorycznych, naturalnych krótkich
+pauz ani potocznych łączników, jeśli finalny sens jest czytelny.
+
+Dla każdego issue wybierz repair_suggestion.action:
+- force_keep: gdy wygląda na to, że montaż wyciął słowo, łącznik albo krótki
+  fragment potrzebny do sensu,
+- force_drop: tylko gdy problem jest oczywistą resztką, powtórką lub noise i
+  masz wysoką pewność, że usunięcie nie zniszczy sensu,
+- manual_review: gdy potrzebny jest odsłuch albo decyzja jest niepewna,
+- no_auto_repair: gdy issue jest informacyjne albo nie da się naprawić prostą
+  zmianą keep/drop.
+
+Jeśli masz wątpliwość, wybierz manual_review. Nie wymyślaj raw timestampów:
+skrypt po Twojej odpowiedzi zmapuje final range na raw_ranges z timeline_map.
+"""
+
+QUALITY_CHECK_USER_PROMPT_TEMPLATE = """Przeanalizuj finalną transkrypcję zmontowanego filmu.
+
+Zwróć:
+- status: pass, needs_review albo fail,
+- issues: konkretne problemy do poprawki,
+- repair_suggestion dla każdego issue,
+- overall_notes: krótki opis jakości finalnego montażu.
+
+Kontekst mapowania raw:
+{qa_context_json}
+
+Finalna transkrypcja:
+{transcript_json}
+"""
