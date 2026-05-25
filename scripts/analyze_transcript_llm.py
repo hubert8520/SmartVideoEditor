@@ -14,6 +14,16 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from smart_video_editor.detection.local import detect_local_candidates  # noqa: E402
+from smart_video_editor.llm.prompts import (  # noqa: E402
+    EDIT_ANALYSIS_SYSTEM_PROMPT_PL,
+    EDIT_ANALYSIS_USER_PROMPT_TEMPLATE,
+)
+from smart_video_editor.transcription.normalization import normalize_words_payload  # noqa: E402
+
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 DEFAULT_TRANSCRIPT_PATH = ARTIFACTS_DIR / "raw_transcription.json"
 LEGACY_TRANSCRIPT_PATH = ARTIFACTS_DIR / "raw_transcrpition.json"
@@ -21,71 +31,8 @@ DEFAULT_OUTPUT_PATH = ARTIFACTS_DIR / "llm_edit_decisions.json"
 DEFAULT_MODEL = "gpt-5.2"
 PLACEHOLDER_KEY_MARKERS = ("your-", "your_", "wklej", "tutaj", "...")
 TIMESTAMP_RE = re.compile(r"^\d{2}:\d{2}:\d{2}:\d{3}$")
-
-
-SYSTEM_PROMPT = """Jesteś doświadczonym montażystą krótkich filmów edukacyjnych i sprzedażowych po polsku.
-
-Analizujesz transkrypcję filmu z segmentami i słowami. Najważniejsze: decyzje montażowe mają być zakotwiczone w konkretnych word_id, bo późniejszy cut planner tnie po granicach słów.
-
-Najpierw wyznacz thought_blocks, czyli całe jednostki sensu: nagłówki sekcji, pytania, przejścia logiczne, kroki struktury, kompletne myśli i case study. Potem dopiero proponuj drop_ranges. Cut planner będzie chronił te bloki przed przypadkowym cięciem w środku.
-
-Usuwaj:
-- false starty, czyli rozpoczęte i porzucone wypowiedzi,
-- powtórzone próby tej samej myśli, jeśli późniejsza wersja jest pełniejsza lub brzmi naturalniej,
-- krótkie prefixy pełniejszej frazy, np. "żeby post" przed "żeby post trafił...",
-- wypełniacze typu "yyy", "eee", "aaaa", "kurde", "no" gdy nie pełnią funkcji stylistycznej,
-- niedokończone mostki typu "bo inaczej", "więc", "żeby", "jeśli", jeśli nie prowadzą do logicznego wyjaśnienia,
-- krótkie restartujące frazy przed poprawną wersją zdania,
-- fragmenty, które rozbijają flow i nie wnoszą treści.
-
-Nie usuwaj:
-- celowych powtórzeń retorycznych,
-- ważnych przejść logicznych,
-- fragmentów potrzebnych do zrozumienia następnej myśli,
-- końcówek zdań, które domykają sens, np. "zanim nagrasz",
-- naturalnych potknięć, jeśli zdanie nadal jest zrozumiałe i brzmi autentycznie,
-- fragmentu tylko dlatego, że zawiera słowo "no", "więc", "ale", "bo" albo "jeśli".
-
-Zasady decyzji:
-- Dla drop_ranges i review_ranges podawaj start_word_id i end_word_id jako inclusive range.
-- Dla thought_blocks także podawaj start_word_id i end_word_id jako inclusive range.
-- Wybieraj minimalny zakres słów do usunięcia. Nie wycinaj słów potrzebnych do sensu zdania.
-- Jeśli wskazujesz false start, zakończ zakres na ostatnim słowie nieudanej próby i zostaw pełną wersję.
-- Jeśli fragment jest częścią ważnego thought_block, ale nie jesteś pewien, czy można go bezpiecznie wyciąć, użyj review_ranges.
-- Jeśli nie masz pewności, użyj review_ranges zamiast drop_ranges.
-- Confidence podawaj jako liczbę od 0 do 1.
-- Reason ma być konkretny i montażowy, nie ogólnikowy.
-- Timestampy start/end mają odpowiadać wybranym word_id.
-"""
-
-
-USER_PROMPT_TEMPLATE = """Przeanalizuj poniższy raw_transcription.json.
-
-Kontekst:
-To jest transkrypcja surowego nagrania edukacyjnego/marketingowego. Osoba często nagrywa kilka prób tej samej myśli. Chcemy stworzyć dynamiczny, ale logiczny edit.
-
-Zwróć decyzje montażowe:
-- thought_blocks: pełne jednostki sensu, których nie należy rozcinać przypadkiem
-- drop_ranges: fragmenty do wycięcia automatycznie
-- review_ranges: fragmenty podejrzane, ale wymagające sprawdzenia
-- keep_notes: istotne uwagi o fragmentach, których nie należy wycinać
-- overall_notes: krótki opis najważniejszych problemów w nagraniu
-
-Każda decyzja ma być oparta na sensie wypowiedzi, nie tylko na pojedynczych słowach. Używaj word_id, nie wymyślaj własnych identyfikatorów.
-
-Role dla thought_blocks:
-- section_heading
-- transition_question
-- structure_step
-- core_explanation
-- case_study
-- result
-- aside
-- other
-
-Transkrypcja:
-{transcript_json}
-"""
+SYSTEM_PROMPT = EDIT_ANALYSIS_SYSTEM_PROMPT_PL
+USER_PROMPT_TEMPLATE = EDIT_ANALYSIS_USER_PROMPT_TEMPLATE
 
 
 EDIT_DECISIONS_SCHEMA: dict[str, Any] = {
@@ -159,6 +106,16 @@ EDIT_DECISIONS_SCHEMA: dict[str, Any] = {
                     },
                     "confidence": {"type": "number"},
                     "affected_text": {"type": "string"},
+                    "candidate_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "cut_risk": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                    "preserves_meaning": {"type": "boolean"},
+                    "safety_basis": {"type": "string"},
                 },
                 "required": [
                     "start_word_id",
@@ -169,6 +126,10 @@ EDIT_DECISIONS_SCHEMA: dict[str, Any] = {
                     "reason_category",
                     "confidence",
                     "affected_text",
+                    "candidate_ids",
+                    "cut_risk",
+                    "preserves_meaning",
+                    "safety_basis",
                 ],
             },
         },
@@ -186,6 +147,15 @@ EDIT_DECISIONS_SCHEMA: dict[str, Any] = {
                     "confidence": {"type": "number"},
                     "affected_text": {"type": "string"},
                     "question": {"type": "string"},
+                    "candidate_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "uncertainty_reason": {"type": "string"},
+                    "suggested_action": {
+                        "type": "string",
+                        "enum": ["manual_review", "audio_review", "llm_context_review", "keep"],
+                    },
                 },
                 "required": [
                     "start_word_id",
@@ -196,6 +166,36 @@ EDIT_DECISIONS_SCHEMA: dict[str, Any] = {
                     "confidence",
                     "affected_text",
                     "question",
+                    "candidate_ids",
+                    "uncertainty_reason",
+                    "suggested_action",
+                ],
+            },
+        },
+        "candidate_reviews": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "candidate_id": {"type": "string"},
+                    "decision": {
+                        "type": "string",
+                        "enum": ["approve_drop", "review", "reject"],
+                    },
+                    "reason": {"type": "string"},
+                    "safety_basis": {"type": "string"},
+                    "target": {
+                        "type": "string",
+                        "enum": ["drop_ranges", "review_ranges", "keep_notes", "none"],
+                    },
+                },
+                "required": [
+                    "candidate_id",
+                    "decision",
+                    "reason",
+                    "safety_basis",
+                    "target",
                 ],
             },
         },
@@ -224,7 +224,14 @@ EDIT_DECISIONS_SCHEMA: dict[str, Any] = {
         },
         "overall_notes": {"type": "string"},
     },
-    "required": ["thought_blocks", "drop_ranges", "review_ranges", "keep_notes", "overall_notes"],
+    "required": [
+        "thought_blocks",
+        "drop_ranges",
+        "review_ranges",
+        "candidate_reviews",
+        "keep_notes",
+        "overall_notes",
+    ],
 }
 
 
@@ -502,9 +509,39 @@ def compact_transcript_for_prompt(transcript: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def local_candidates_for_prompt(transcript: dict[str, Any]) -> list[dict[str, Any]]:
+    domain_words = normalize_words_payload(transcript["words"])
+    candidates = []
+    for index, candidate in enumerate(detect_local_candidates(domain_words), start=1):
+        candidates.append(
+            {
+                "id": f"local-{index:03d}",
+                "category": candidate.category,
+                "recommended_action": candidate.recommended_action,
+                "confidence": candidate.confidence,
+                "start_word_id": candidate.start_word_id,
+                "end_word_id": candidate.end_word_id,
+                "start": seconds_to_timestamp(candidate.start),
+                "end": seconds_to_timestamp(candidate.end),
+                "text": candidate.text,
+                "reason": candidate.reason,
+                "source": candidate.source,
+            }
+        )
+    return candidates
+
+
 def build_user_prompt(transcript: dict[str, Any]) -> str:
     transcript_json = json.dumps(compact_transcript_for_prompt(transcript), ensure_ascii=False, indent=2)
-    return USER_PROMPT_TEMPLATE.format(transcript_json=transcript_json)
+    candidate_json = json.dumps(local_candidates_for_prompt(transcript), ensure_ascii=False, indent=2)
+    return USER_PROMPT_TEMPLATE.format(
+        candidate_json=candidate_json,
+        transcript_json=transcript_json,
+    )
+
+
+def known_candidate_ids(transcript: dict[str, Any]) -> set[str]:
+    return {str(candidate["id"]) for candidate in local_candidates_for_prompt(transcript)}
 
 
 def validate_word_range(
@@ -550,6 +587,10 @@ def validate_output(decisions: dict[str, Any], transcript: dict[str, Any]) -> No
             "reason_category",
             "confidence",
             "affected_text",
+            "candidate_ids",
+            "cut_risk",
+            "preserves_meaning",
+            "safety_basis",
         ),
         "review_ranges": (
             "start_word_id",
@@ -560,6 +601,9 @@ def validate_output(decisions: dict[str, Any], transcript: dict[str, Any]) -> No
             "confidence",
             "affected_text",
             "question",
+            "candidate_ids",
+            "uncertainty_reason",
+            "suggested_action",
         ),
         "keep_notes": (
             "start_word_id",
@@ -582,6 +626,44 @@ def validate_output(decisions: dict[str, Any], transcript: dict[str, Any]) -> No
                 if key not in item:
                     fail(f"Model output {top_key}[{index}] is missing {key!r}.")
             validate_word_range(item, top_key, index, valid_word_ids)
+
+            if top_key == "drop_ranges":
+                if item["cut_risk"] != "low":
+                    fail(f"Model output drop_ranges[{index}] must use review_ranges unless cut_risk is low.")
+                if not bool(item["preserves_meaning"]):
+                    fail(f"Model output drop_ranges[{index}] must preserve meaning.")
+                if not str(item["safety_basis"]).strip():
+                    fail(f"Model output drop_ranges[{index}].safety_basis must be non-empty.")
+
+            if top_key == "review_ranges":
+                if not str(item["uncertainty_reason"]).strip():
+                    fail(f"Model output review_ranges[{index}].uncertainty_reason must be non-empty.")
+
+    candidate_ids = known_candidate_ids(transcript)
+    candidate_reviews = decisions.get("candidate_reviews")
+    if not isinstance(candidate_reviews, list):
+        fail("Model output 'candidate_reviews' must be a list.")
+    required_candidate_review_keys = ("candidate_id", "decision", "reason", "safety_basis", "target")
+    for index, item in enumerate(candidate_reviews):
+        if not isinstance(item, dict):
+            fail(f"Model output candidate_reviews[{index}] must be an object.")
+        for key in required_candidate_review_keys:
+            if key not in item:
+                fail(f"Model output candidate_reviews[{index}] is missing {key!r}.")
+        candidate_id = str(item.get("candidate_id", ""))
+        if candidate_id not in candidate_ids:
+            fail(f"Model output candidate_reviews[{index}] references unknown candidate_id {candidate_id!r}.")
+        if not str(item.get("safety_basis", "")).strip():
+            fail(f"Model output candidate_reviews[{index}].safety_basis must be non-empty.")
+
+    for top_key in ("drop_ranges", "review_ranges"):
+        for index, item in enumerate(decisions[top_key]):
+            ids = item.get("candidate_ids")
+            if not isinstance(ids, list):
+                fail(f"Model output {top_key}[{index}].candidate_ids must be a list.")
+            unknown = [str(candidate_id) for candidate_id in ids if str(candidate_id) not in candidate_ids]
+            if unknown:
+                fail(f"Model output {top_key}[{index}] references unknown candidate_ids: {unknown}")
 
     if not isinstance(decisions.get("overall_notes"), str):
         fail("Model output 'overall_notes' must be a string.")
@@ -641,6 +723,7 @@ def main() -> None:
         print(f"Transcript: {transcript_path}")
         print(f"Segments: {len(transcript['segments'])}")
         print(f"Words: {len(transcript['words'])}")
+        print(f"Local candidates: {len(local_candidates_for_prompt(transcript))}")
         print(f"Model: {args.model}")
         print(f"Reasoning: {'disabled' if args.no_reasoning else args.reasoning_effort}")
         print(f"Prompt characters: {len(SYSTEM_PROMPT) + len(user_prompt)}")
