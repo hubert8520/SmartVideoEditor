@@ -12,10 +12,21 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import transcribe_video  # noqa: E402
+
+from smart_video_editor.llm.prompts import (  # noqa: E402
+    QUALITY_CHECK_SYSTEM_PROMPT_PL,
+    QUALITY_CHECK_USER_PROMPT_TEMPLATE,
+)
+from smart_video_editor.reporting.quality import (  # noqa: E402
+    enrich_quality_report,
+    quality_mapping_context_for_prompt,
+)
 
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
@@ -23,40 +34,9 @@ EDITED_DIR = PROJECT_ROOT / "edited"
 DEFAULT_VIDEO_PATH = EDITED_DIR / "edited_video.mp4"
 DEFAULT_TRANSCRIPT_OUTPUT = ARTIFACTS_DIR / "edited_transcription.json"
 DEFAULT_OUTPUT_PATH = ARTIFACTS_DIR / "final_quality_report.json"
+DEFAULT_EDIT_DECISIONS = ARTIFACTS_DIR / "edit_decisions.json"
+DEFAULT_RAW_TRANSCRIPT = ARTIFACTS_DIR / "raw_transcription.json"
 DEFAULT_LLM_MODEL = "gpt-5.2"
-
-
-SYSTEM_PROMPT = """Jesteś kontrolerem jakości montażu krótkich filmów edukacyjnych po polsku.
-
-Analizujesz transkrypcję finalnego, już zmontowanego filmu. Twoje zadanie to wykryć problemy, które powinny wrócić do poprawki montażowej.
-
-Szukaj:
-- urwanych słów albo słów brzmiących jak ucięte, np. "zaa", "któ", "żeb",
-- nienaturalnych skoków logicznych między zdaniami,
-- powtórek, które powinny zostać wycięte, np. "żeby post" i zaraz "żeby post trafił",
-- zawieszonych myśli bez dokończenia,
-- resztek setupu nagrania, przekleństw, testowych tekstów, dźwięków opisanych w transkrypcji jako off-topic,
-- fragmentów, które brzmią jak błąd montażowy, a nie naturalny styl mówienia.
-
-Nie oznaczaj jako problem:
-- normalnych, celowych powtórzeń retorycznych,
-- krótkich łączników typu "no", "więc", "ale", jeśli zdanie ma sens,
-- lekkiej potoczności, jeśli film nadal brzmi naturalnie.
-
-Decyzje zakotwiczaj w word_id. Jeśli problem dotyczy przejścia między dwoma fragmentami, wskaż najbliższy zakres słów wokół problemu.
-"""
-
-
-USER_PROMPT_TEMPLATE = """Przeanalizuj finalną transkrypcję zmontowanego filmu.
-
-Zwróć:
-- status: pass, needs_review albo fail
-- issues: konkretne problemy do poprawki
-- overall_notes: krótki opis jakości finalnego montażu
-
-Finalna transkrypcja:
-{transcript_json}
-"""
 
 
 QUALITY_SCHEMA: dict[str, Any] = {
@@ -96,6 +76,33 @@ QUALITY_SCHEMA: dict[str, Any] = {
                     "description": {"type": "string"},
                     "affected_text": {"type": "string"},
                     "suggested_action": {"type": "string"},
+                    "repair_suggestion": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": [
+                                    "force_keep",
+                                    "force_drop",
+                                    "manual_review",
+                                    "no_auto_repair",
+                                ],
+                            },
+                            "confidence": {
+                                "type": "string",
+                                "enum": ["low", "medium", "high"],
+                            },
+                            "rationale": {"type": "string"},
+                            "requires_manual_review": {"type": "boolean"},
+                        },
+                        "required": [
+                            "action",
+                            "confidence",
+                            "rationale",
+                            "requires_manual_review",
+                        ],
+                    },
                 },
                 "required": [
                     "start_word_id",
@@ -107,6 +114,7 @@ QUALITY_SCHEMA: dict[str, Any] = {
                     "description",
                     "affected_text",
                     "suggested_action",
+                    "repair_suggestion",
                 ],
             },
         },
@@ -179,6 +187,18 @@ def parse_args() -> argparse.Namespace:
         help="Output path for quality report.",
     )
     parser.add_argument(
+        "--edit-decisions",
+        type=Path,
+        default=DEFAULT_EDIT_DECISIONS,
+        help="edit_decisions.json used to map final issue ranges back to raw time.",
+    )
+    parser.add_argument(
+        "--raw-transcript",
+        type=Path,
+        default=DEFAULT_RAW_TRANSCRIPT,
+        help="raw_transcription.json used to add raw context to QA issues.",
+    )
+    parser.add_argument(
         "--env-file",
         type=Path,
         help="Path to a .env file. Defaults to .env in the current directory or project root.",
@@ -194,6 +214,18 @@ def parse_args() -> argparse.Namespace:
 def fail(message: str) -> None:
     print(f"Error: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def load_optional_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        fail(f"Invalid JSON in {path}: {exc}")
+    if not isinstance(data, dict):
+        fail(f"Expected JSON object in {path}.")
+    return data
 
 
 def compact_transcript_for_prompt(transcript: dict[str, Any]) -> dict[str, Any]:
@@ -226,6 +258,7 @@ def call_openai_quality(
     model: str,
     reasoning_effort: str | None,
     transcript: dict[str, Any],
+    qa_context: dict[str, Any],
 ) -> dict[str, Any]:
     try:
         from openai import OpenAI
@@ -233,11 +266,15 @@ def call_openai_quality(
         fail("Missing Python package 'openai'. Install dependencies with: pip install -r requirements.txt")
 
     transcript_json = json.dumps(compact_transcript_for_prompt(transcript), ensure_ascii=False, indent=2)
+    qa_context_json = json.dumps(qa_context, ensure_ascii=False, indent=2)
     client = OpenAI(api_key=api_key)
     params: dict[str, Any] = {
         "model": model,
-        "instructions": SYSTEM_PROMPT,
-        "input": USER_PROMPT_TEMPLATE.format(transcript_json=transcript_json),
+        "instructions": QUALITY_CHECK_SYSTEM_PROMPT_PL,
+        "input": QUALITY_CHECK_USER_PROMPT_TEMPLATE.format(
+            qa_context_json=qa_context_json,
+            transcript_json=transcript_json,
+        ),
         "text": {
             "format": {
                 "type": "json_schema",
@@ -285,11 +322,19 @@ def main() -> None:
     transcription_model = transcribe_video.resolve_model(transcribe_args)
     transcribe_video.validate_provider_options(transcribe_args, transcription_model)
     active_model = transcribe_video.display_model(args.provider, transcription_model, False)
+    edit_decisions = load_optional_json(args.edit_decisions)
+    raw_transcript = load_optional_json(args.raw_transcript)
+    qa_context = quality_mapping_context_for_prompt(
+        edit_decisions=edit_decisions,
+        raw_transcript=raw_transcript,
+    )
 
     if args.dry_run:
         print(f"Video: {args.video}")
         print(f"QA transcription: {args.provider}/{active_model}")
         print(f"QA LLM model: {args.model}")
+        print(f"Edit decisions mapping: {'available' if edit_decisions else 'missing'} ({args.edit_decisions})")
+        print(f"Raw transcript context: {'available' if raw_transcript else 'missing'} ({args.raw_transcript})")
         print("Dry run complete. No API call was made.")
         return
 
@@ -318,7 +363,14 @@ def main() -> None:
         fail("OPENAI_API_KEY is missing or still looks like a placeholder.")
 
     reasoning_effort = None if args.no_reasoning else args.reasoning_effort
-    report = call_openai_quality(openai_key, args.model, reasoning_effort, transcript)
+    report = call_openai_quality(openai_key, args.model, reasoning_effort, transcript, qa_context)
+    report = enrich_quality_report(
+        report,
+        edit_decisions=edit_decisions,
+        raw_transcript=raw_transcript,
+        edit_decisions_path=args.edit_decisions,
+        raw_transcript_path=args.raw_transcript,
+    )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
