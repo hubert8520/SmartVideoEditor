@@ -98,6 +98,7 @@ def write_decisions(
         "cut_planner_review": {
             "applied_windows": planner_result.applied_windows,
             "blocked_windows": planner_result.blocked_windows,
+            "review_windows": getattr(planner_result, "review_windows", []),
             "boundary_issues": planner_result.boundary_issues,
             "simulated_text": planner_result.simulated_text,
         },

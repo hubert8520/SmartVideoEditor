@@ -2384,6 +2384,10 @@ from smart_video_editor.media.rendering import (  # noqa: E402
     render_video as render_video,
     speech_intervals_from_silences as speech_intervals_from_silences,
 )
+from smart_video_editor.planning.decision_planner import (  # noqa: E402
+    plan_drop_windows as plan_drop_windows,
+    validate_boundaries as validate_boundaries,
+)
 
 def main() -> None:
     start_time = time.time()
