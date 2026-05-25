@@ -40,6 +40,7 @@ def test_edit_video_cli_uses_extracted_modules():
     assert edit_video_cli.render_video.__module__ == "smart_video_editor.media.rendering"
     assert edit_video_cli.write_decisions.__module__ == "smart_video_editor.editing.decisions_io"
     assert edit_video_cli.run_quality_check.__module__ == "smart_video_editor.editing.quality"
+    assert edit_video_cli.plan_drop_windows.__module__ == "smart_video_editor.planning.decision_planner"
 
 
 def test_edit_video_script_is_thin_wrapper():
