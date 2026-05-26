@@ -59,6 +59,14 @@ class AttemptSpan:
 
 
 @dataclass(frozen=True, slots=True)
+class AttemptCompleteness:
+    token_count: int
+    score: float
+    markers: tuple[str, ...]
+    is_complete: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RepeatedAttemptGroup:
     id: int
     earlier: AttemptSpan
@@ -66,6 +74,8 @@ class RepeatedAttemptGroup:
     shared_prefix: tuple[str, ...]
     shared_prefix_word_count: int
     later_extra_word_count: int
+    earlier_completeness: AttemptCompleteness
+    later_completeness: AttemptCompleteness
     confidence: float
     recommended_action: str
     reason: str
@@ -129,12 +139,65 @@ def _span(
 
 def is_incomplete_attempt_tokens(tokens: tuple[str, ...] | list[str]) -> bool:
     """Return whether token sequence looks like an unfinished spoken thought."""
-    if not tokens:
+    return not score_attempt_completeness(tokens).is_complete
+
+
+def score_attempt_completeness(tokens: tuple[str, ...] | list[str]) -> AttemptCompleteness:
+    """Score whether a token sequence looks like a complete spoken attempt."""
+    content_tokens = tuple(
+        normalized
+        for token in tokens
+        if (normalized := normalize_text(token)) and normalized not in FILLER_TOKENS
+    )
+    markers: list[str] = []
+    if not content_tokens:
+        return AttemptCompleteness(
+            token_count=0,
+            score=0.0,
+            markers=("empty_attempt",),
+            is_complete=False,
+        )
+
+    score = min(1.0, 0.38 + 0.09 * len(content_tokens))
+    last = content_tokens[-1]
+    if last in INCOMPLETE_END_TOKENS:
+        markers.append("ends_with_incomplete_token")
+        score -= 0.45
+    if last in OPEN_ENDED_VERBS:
+        markers.append("ends_with_open_ended_verb")
+        score -= 0.38
+    if len(content_tokens) <= 2:
+        markers.append("very_short_attempt")
+        score -= 0.08
+    if any(_is_prefix_token(last, token) for token in content_tokens[:-1]):
+        markers.append("ends_with_truncated_prefix")
+        score -= 0.35
+
+    score = max(0.0, min(1.0, score))
+    blocking_markers = {
+        "empty_attempt",
+        "ends_with_incomplete_token",
+        "ends_with_open_ended_verb",
+        "ends_with_truncated_prefix",
+    }
+    return AttemptCompleteness(
+        token_count=len(content_tokens),
+        score=round(score, 3),
+        markers=tuple(markers),
+        is_complete=score >= 0.62 and not (set(markers) & blocking_markers),
+    )
+
+
+def _legacy_incomplete_attempt_tokens(tokens: tuple[str, ...] | list[str]) -> bool:
+    normalized_tokens = tuple(
+        normalized for token in tokens if (normalized := normalize_text(token))
+    )
+    if not normalized_tokens:
         return False
-    last = tokens[-1]
+    last = normalized_tokens[-1]
     if last in INCOMPLETE_END_TOKENS or last in OPEN_ENDED_VERBS:
         return True
-    if any(_is_prefix_token(last, token) for token in tokens[:-1]):
+    if any(_is_prefix_token(last, token) for token in normalized_tokens[:-1]):
         return True
     return False
 
@@ -142,16 +205,23 @@ def is_incomplete_attempt_tokens(tokens: tuple[str, ...] | list[str]) -> bool:
 def classify_repeated_attempt(
     earlier_tokens: tuple[str, ...] | list[str],
     *,
+    later_tokens: tuple[str, ...] | list[str] = (),
     shared_prefix_word_count: int,
     later_extra_word_count: int,
     boundary_gap: float,
     pause_signal: float = 0.65,
 ) -> tuple[str, str, float]:
     """Classify a repeated attempt as DROP or REVIEW with a conservative reason."""
+    earlier_completeness = score_attempt_completeness(earlier_tokens)
+    later_completeness = score_attempt_completeness(later_tokens) if later_tokens else None
+
     if later_extra_word_count < 2:
         return "REVIEW", "repeated_attempt_without_fuller_later_take", 0.62
 
-    if is_incomplete_attempt_tokens(earlier_tokens):
+    if later_completeness is not None and not later_completeness.is_complete:
+        return "REVIEW", "later_attempt_also_incomplete_needs_review", 0.7
+
+    if not earlier_completeness.is_complete or _legacy_incomplete_attempt_tokens(earlier_tokens):
         return "DROP", "earlier_incomplete_attempt_before_fuller_restart", 0.9
 
     if len(earlier_tokens) <= 2 and shared_prefix_word_count >= 2:
@@ -208,9 +278,16 @@ def find_repeated_attempt_groups(
             boundary_gap = words[restart_index].timestamp - words[restart_index - 1].end
             action, reason, confidence = classify_repeated_attempt(
                 tuple(token for _, token in earlier_tokens),
+                later_tokens=tuple(token for _, token in later_tokens),
                 shared_prefix_word_count=len(prefix),
                 later_extra_word_count=later_extra,
                 boundary_gap=boundary_gap,
+            )
+            earlier_completeness = score_attempt_completeness(
+                tuple(token for _, token in earlier_tokens)
+            )
+            later_completeness = score_attempt_completeness(
+                tuple(token for _, token in later_tokens)
             )
             key = (start_index, restart_index)
             if key in seen_starts:
@@ -229,6 +306,8 @@ def find_repeated_attempt_groups(
                     shared_prefix=tuple(token for _, token in prefix),
                     shared_prefix_word_count=len(prefix),
                     later_extra_word_count=later_extra,
+                    earlier_completeness=earlier_completeness,
+                    later_completeness=later_completeness,
                     confidence=confidence,
                     recommended_action=action,
                     reason=reason,

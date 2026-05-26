@@ -88,6 +88,20 @@ def test_planner_applies_local_repeated_attempt_candidate():
     assert result.simulated_text == "Dzisiaj pokażę wam jak ustawić kampanię"
 
 
+def test_planner_reviews_repeated_attempt_when_later_take_is_incomplete():
+    words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak to")
+
+    result = plan_with_local_detectors(words)
+
+    assert not result.applied_windows
+    assert not result.drop_windows
+    assert any(
+        window["category"] == "repeated_attempt"
+        and window["review_reason"] == "candidate_marked_review"
+        for window in result.review_windows
+    )
+
+
 def test_planner_reviews_rhetorical_repeat_candidate_without_cutting():
     words = make_words("to jest ważne to jest ważne dla mnie")
 

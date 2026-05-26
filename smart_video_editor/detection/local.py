@@ -374,6 +374,7 @@ def detect_repeated_take_prefixes(
                 boundary_gap = words[repeat_index].timestamp - words[end_index - 1].end
                 action, reason, confidence = classify_repeated_attempt(
                     tuple(phrase),
+                    later_tokens=tuple(tokens[repeat_index:search_end]),
                     shared_prefix_word_count=phrase_len,
                     later_extra_word_count=later_extra,
                     boundary_gap=boundary_gap,

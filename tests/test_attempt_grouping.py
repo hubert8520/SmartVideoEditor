@@ -1,6 +1,9 @@
 from smart_video_editor.detection.local import detect_local_candidates
 from smart_video_editor.domain.models import TranscriptWord
-from smart_video_editor.segmentation.attempts import find_repeated_attempt_groups
+from smart_video_editor.segmentation.attempts import (
+    find_repeated_attempt_groups,
+    score_attempt_completeness,
+)
 from smart_video_editor.text import normalize_text
 
 
@@ -40,6 +43,18 @@ def test_attempt_group_drops_short_starter_before_fuller_restart():
     assert candidates[0].recommended_action == "DROP"
 
 
+def test_attempt_completeness_scores_finished_and_unfinished_attempts():
+    unfinished = score_attempt_completeness(("Dzisiaj", "pokażę", "wam", "jak"))
+    finished = score_attempt_completeness(
+        ("Dzisiaj", "pokażę", "wam", "jak", "ustawić", "kampanię")
+    )
+
+    assert not unfinished.is_complete
+    assert "ends_with_incomplete_token" in unfinished.markers
+    assert finished.is_complete
+    assert finished.score > unfinished.score
+
+
 def test_attempt_group_drops_incomplete_pronoun_tail_before_restart():
     words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak ustawić kampanię")
 
@@ -50,6 +65,18 @@ def test_attempt_group_drops_incomplete_pronoun_tail_before_restart():
     assert groups[0].recommended_action == "DROP"
     assert groups[0].reason == "earlier_incomplete_attempt_before_fuller_restart"
     assert candidates[0].recommended_action == "DROP"
+
+
+def test_attempt_group_reviews_when_later_attempt_is_still_incomplete():
+    words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak to")
+
+    groups = find_repeated_attempt_groups(words)
+    candidates = repeated_attempt_candidates(words)
+
+    assert groups[0].recommended_action == "REVIEW"
+    assert groups[0].reason == "later_attempt_also_incomplete_needs_review"
+    assert not groups[0].later_completeness.is_complete
+    assert candidates[0].recommended_action == "REVIEW"
 
 
 def test_attempt_group_reviews_possible_rhetorical_repeat():
