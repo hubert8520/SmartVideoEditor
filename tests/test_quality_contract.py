@@ -57,7 +57,7 @@ def test_bad_marker_expands_to_failed_take():
 
     marker = [candidate for candidate in candidates if candidate.category == "bad_marker_take"]
     assert marker
-    assert marker[0].text == "ustawiam kampanię kurwa"
+    assert marker[0].text == "ustawiam kampanię kurwa jeszcze raz"
     assert marker[0].recommended_action == "DROP"
 
 

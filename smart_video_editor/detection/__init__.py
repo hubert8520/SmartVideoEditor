@@ -6,6 +6,7 @@ from smart_video_editor.detection.local import (
     detect_local_candidates,
     detect_partial_repeats,
     detect_repeated_take_prefixes,
+    detect_truncated_word_restarts,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "detect_local_candidates",
     "detect_partial_repeats",
     "detect_repeated_take_prefixes",
+    "detect_truncated_word_restarts",
 ]
