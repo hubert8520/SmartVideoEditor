@@ -32,6 +32,7 @@ class PlannerCandidate:
     confidence: float | None = None
     category: str = "other"
     recommended_action: CandidateDecision = "DROP"
+    evidence: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -289,6 +290,8 @@ def _candidate_record(
         "force": candidate.force,
         "recommended_action": candidate.recommended_action,
     }
+    if candidate.evidence:
+        record["evidence"] = candidate.evidence
     record.update(extra)
     return record
 
@@ -517,6 +520,7 @@ def _local_candidates(words: list[Any]) -> list[PlannerCandidate]:
                 confidence=candidate.confidence,
                 category=candidate.category,
                 recommended_action=candidate.recommended_action,
+                evidence=candidate.evidence,
             )
         )
     return candidates

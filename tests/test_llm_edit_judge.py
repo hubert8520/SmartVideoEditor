@@ -39,6 +39,46 @@ def sample_transcript():
     }
 
 
+def repeated_attempt_transcript():
+    words = [
+        "Dzisiaj",
+        "pokażę",
+        "wam",
+        "Dzisiaj",
+        "pokażę",
+        "wam",
+        "jak",
+        "ustawić",
+        "kampanię",
+    ]
+    cursor = 0.0
+    payload_words = []
+    for index, word in enumerate(words):
+        payload_words.append(
+            {
+                "id": index,
+                "timestamp": f"00:00:{int(cursor):02d}:{int((cursor % 1) * 1000):03d}",
+                "end": f"00:00:{int(cursor + 0.2):02d}:{int(((cursor + 0.2) % 1) * 1000):03d}",
+                "word": word,
+            }
+        )
+        cursor += 0.35
+    return {
+        "version": "2.0",
+        "source": {"provider": "deepgram", "word_level": True},
+        "segments": [
+            {
+                "id": 0,
+                "timestamp": payload_words[0]["timestamp"],
+                "end": payload_words[-1]["end"],
+                "transcription": " ".join(words),
+                "word_ids": [word["id"] for word in payload_words],
+            }
+        ],
+        "words": payload_words,
+    }
+
+
 def valid_decisions():
     return {
         "thought_blocks": [
@@ -97,6 +137,20 @@ def test_user_prompt_includes_local_candidates_and_safety_instructions():
     assert "Local candidates" in prompt
     assert "safety_basis" in analyzer.SYSTEM_PROMPT
     assert "jak skonfi" in prompt
+
+
+def test_user_prompt_includes_attempt_completeness_evidence():
+    analyzer = load_analyzer()
+    transcript = repeated_attempt_transcript()
+
+    candidates = analyzer.local_candidates_for_prompt(transcript)
+    prompt = analyzer.build_user_prompt(transcript)
+    repeated = next(candidate for candidate in candidates if candidate["category"] == "repeated_attempt")
+
+    assert repeated["evidence"]["earlier"]["completeness"]["is_complete"] is False
+    assert repeated["evidence"]["later"]["completeness"]["is_complete"] is True
+    assert "later_extra_word_count" in prompt
+    assert "evidence.completeness" in analyzer.USER_PROMPT_TEMPLATE
 
 
 def test_validate_output_accepts_candidate_aware_schema():

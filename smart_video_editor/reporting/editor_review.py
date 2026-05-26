@@ -61,6 +61,73 @@ def action_label(action: str) -> str:
     return ACTION_LABELS.get(action, action)
 
 
+def _window_seconds(window: dict[str, Any], key: str) -> float:
+    value = window.get(key)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        return timestamp_to_seconds(value)
+    return 0.0
+
+
+def _completeness_summary(evidence: dict[str, Any]) -> str:
+    pieces: list[str] = []
+    for label, source_key in (("wczesniejsza", "earlier"), ("pozniejsza", "later")):
+        source = evidence.get(source_key)
+        if not isinstance(source, dict):
+            continue
+        completeness = source.get("completeness")
+        if not isinstance(completeness, dict):
+            continue
+        markers = completeness.get("markers", [])
+        if isinstance(markers, list):
+            marker_text = ", ".join(str(marker) for marker in markers) or "brak"
+        else:
+            marker_text = str(markers)
+        pieces.append(
+            f"{label}: score={completeness.get('score')}, "
+            f"complete={completeness.get('is_complete')}, markers={marker_text}"
+        )
+    return "; ".join(pieces)
+
+
+def planner_evidence_rows(edit_decisions: dict[str, Any]) -> list[dict[str, str]]:
+    """Summarize local detector evidence carried into edit_decisions.json."""
+    review = edit_decisions.get("cut_planner_review")
+    if not isinstance(review, dict):
+        return []
+
+    rows: list[dict[str, str]] = []
+    buckets = (
+        ("applied_windows", "DROP"),
+        ("review_windows", "REVIEW"),
+        ("blocked_windows", "BLOCKED"),
+    )
+    for bucket, action in buckets:
+        windows = review.get(bucket, [])
+        if not isinstance(windows, list):
+            continue
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            evidence = window.get("evidence")
+            if not isinstance(evidence, dict) or not evidence:
+                continue
+            start = _window_seconds(window, "candidate_start") or _window_seconds(window, "start")
+            end = _window_seconds(window, "candidate_end") or _window_seconds(window, "end")
+            rows.append(
+                {
+                    "action": action,
+                    "category": str(window.get("category", "")),
+                    "range": format_range(start, end),
+                    "text": str(window.get("source_text", "")),
+                    "reason": str(window.get("reason", "")),
+                    "summary": _completeness_summary(evidence),
+                }
+            )
+    return rows
+
+
 def _issue_time(issue: dict[str, Any], key: str, fallback: str) -> float:
     final_range = issue.get("final_range")
     if isinstance(final_range, dict):
@@ -226,6 +293,7 @@ def write_editor_review_markdown(
     raw_video_label: str,
     *,
     make_clips: bool,
+    planner_evidence: list[dict[str, str]] | None = None,
 ) -> None:
     summary = review_summary(rows)
     lines = [
@@ -245,6 +313,26 @@ def write_editor_review_markdown(
     notes = str(quality_report.get("overall_notes", "")).strip()
     if notes:
         lines.extend(["## Ogolna uwaga QA", "", notes, ""])
+
+    planner_evidence = planner_evidence or []
+    if planner_evidence:
+        lines.extend(
+            [
+                "## Dowody plannera",
+                "",
+                "Te wpisy pokazuja, dlaczego lokalne kandydaty powtorek trafily do DROP/REVIEW/BLOCKED.",
+                "",
+            ]
+        )
+        for evidence in planner_evidence:
+            lines.extend(
+                [
+                    f"- `{evidence['action']}` `{evidence['category']}` `{evidence['range']}`: "
+                    f"{evidence['text']} ({evidence['reason']})",
+                    f"  - {evidence['summary']}",
+                ]
+            )
+        lines.append("")
 
     for row in rows:
         lines.extend(

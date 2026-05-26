@@ -6,13 +6,17 @@ accept, downgrade to REVIEW, or reject after boundary validation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, cast
 
 from smart_video_editor.domain.models import TranscriptWord
 from smart_video_editor.segmentation.attempts import (
+    AttemptCompleteness,
+    AttemptSpan,
+    RepeatedAttemptGroup,
     classify_repeated_attempt,
     find_repeated_attempt_groups,
+    score_attempt_completeness,
 )
 from smart_video_editor.segmentation.takes import segment_take_indices
 from smart_video_editor.text import normalize_text
@@ -55,6 +59,7 @@ class EditCandidate:
     confidence: float
     recommended_action: CandidateAction = "REVIEW"
     source: str = "local"
+    evidence: dict[str, object] = field(default_factory=dict)
 
 
 def _token(word: TranscriptWord) -> str:
@@ -72,6 +77,7 @@ def _make_candidate(
     reason: str,
     confidence: float,
     recommended_action: CandidateAction,
+    evidence: dict[str, object] | None = None,
 ) -> EditCandidate:
     return EditCandidate(
         category=category,
@@ -83,7 +89,65 @@ def _make_candidate(
         reason=reason,
         confidence=confidence,
         recommended_action=recommended_action,
+        evidence=evidence or {},
     )
+
+
+def _completeness_evidence(completeness: AttemptCompleteness) -> dict[str, object]:
+    return {
+        "token_count": completeness.token_count,
+        "score": completeness.score,
+        "markers": list(completeness.markers),
+        "is_complete": completeness.is_complete,
+    }
+
+
+def _span_evidence(span: AttemptSpan, completeness: AttemptCompleteness) -> dict[str, object]:
+    return {
+        "text": span.text,
+        "word_ids": list(span.word_ids),
+        "tokens": list(span.tokens),
+        "completeness": _completeness_evidence(completeness),
+    }
+
+
+def _attempt_group_evidence(group: RepeatedAttemptGroup) -> dict[str, object]:
+    return {
+        "attempt_group_id": group.id,
+        "shared_prefix": list(group.shared_prefix),
+        "shared_prefix_word_count": group.shared_prefix_word_count,
+        "later_extra_word_count": group.later_extra_word_count,
+        "earlier": _span_evidence(group.earlier, group.earlier_completeness),
+        "later": _span_evidence(group.later, group.later_completeness),
+    }
+
+
+def _prefix_attempt_evidence(
+    earlier_words: list[TranscriptWord],
+    earlier_tokens: tuple[str, ...],
+    later_words: list[TranscriptWord],
+    later_tokens: tuple[str, ...],
+    *,
+    shared_prefix_word_count: int,
+    later_extra_word_count: int,
+) -> dict[str, object]:
+    return {
+        "shared_prefix": list(earlier_tokens[:shared_prefix_word_count]),
+        "shared_prefix_word_count": shared_prefix_word_count,
+        "later_extra_word_count": later_extra_word_count,
+        "earlier": {
+            "text": _candidate_text(earlier_words),
+            "word_ids": [word.id for word in earlier_words],
+            "tokens": list(earlier_tokens),
+            "completeness": _completeness_evidence(score_attempt_completeness(earlier_tokens)),
+        },
+        "later": {
+            "text": _candidate_text(later_words),
+            "word_ids": [word.id for word in later_words],
+            "tokens": list(later_tokens),
+            "completeness": _completeness_evidence(score_attempt_completeness(later_tokens)),
+        },
+    }
 
 
 def _is_prefix_token(fragment: str, full: str) -> bool:
@@ -370,11 +434,13 @@ def detect_repeated_take_prefixes(
                 if not has_fuller_continuation:
                     continue
 
+                later_words = words[repeat_index:search_end]
+                later_tokens = tuple(tokens[repeat_index:search_end])
                 later_extra = sum(1 for token in tokens[repeat_index + phrase_len : search_end] if token)
                 boundary_gap = words[repeat_index].timestamp - words[end_index - 1].end
                 action, reason, confidence = classify_repeated_attempt(
                     tuple(phrase),
-                    later_tokens=tuple(tokens[repeat_index:search_end]),
+                    later_tokens=later_tokens,
                     shared_prefix_word_count=phrase_len,
                     later_extra_word_count=later_extra,
                     boundary_gap=boundary_gap,
@@ -387,6 +453,14 @@ def detect_repeated_take_prefixes(
                         reason=reason,
                         confidence=confidence,
                         recommended_action=action,
+                        evidence=_prefix_attempt_evidence(
+                            candidate_words,
+                            tuple(phrase),
+                            later_words,
+                            later_tokens,
+                            shared_prefix_word_count=phrase_len,
+                            later_extra_word_count=later_extra,
+                        ),
                     )
                 )
                 break
@@ -409,6 +483,7 @@ def detect_repeated_attempts(words: list[TranscriptWord]) -> list[EditCandidate]
                 reason=group.reason,
                 confidence=group.confidence,
                 recommended_action=cast(CandidateAction, group.recommended_action),
+                evidence=_attempt_group_evidence(group),
             )
         )
     return _dedupe(candidates)

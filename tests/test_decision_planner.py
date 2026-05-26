@@ -88,6 +88,18 @@ def test_planner_applies_local_repeated_attempt_candidate():
     assert result.simulated_text == "Dzisiaj pokażę wam jak ustawić kampanię"
 
 
+def test_planner_records_local_candidate_evidence():
+    words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak ustawić kampanię")
+
+    result = plan_with_local_detectors(words)
+    repeated_attempt = next(
+        window for window in result.applied_windows if window["category"] == "repeated_attempt"
+    )
+
+    assert repeated_attempt["evidence"]["earlier"]["completeness"]["is_complete"] is False
+    assert repeated_attempt["evidence"]["later"]["completeness"]["is_complete"] is True
+
+
 def test_planner_reviews_repeated_attempt_when_later_take_is_incomplete():
     words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak to")
 
