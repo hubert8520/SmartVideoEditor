@@ -91,6 +91,38 @@ def _completeness_summary(evidence: dict[str, Any]) -> str:
     return "; ".join(pieces)
 
 
+def _bad_marker_summary(evidence: dict[str, Any]) -> str:
+    marker = evidence.get("marker")
+    failed_take = evidence.get("failed_take")
+    restart = evidence.get("restart")
+    if not any(isinstance(item, dict) for item in (marker, failed_take, restart)):
+        return ""
+
+    marker_text = str(marker.get("text", "")) if isinstance(marker, dict) else ""
+    failed_text = str(failed_take.get("text", "")) if isinstance(failed_take, dict) else ""
+    restart_confirmed = bool(restart.get("confirmed")) if isinstance(restart, dict) else False
+    restart_text = str(restart.get("text", "")) if isinstance(restart, dict) else ""
+    prefix_count = restart.get("prefix_word_count", 0) if isinstance(restart, dict) else 0
+    pieces = [
+        f"marker={marker_text or 'brak'}",
+        f"failed_take={failed_text or 'brak'}",
+        f"restart_confirmed={restart_confirmed}",
+        f"restart_prefix_words={prefix_count}",
+    ]
+    if restart_text:
+        pieces.append(f"restart={restart_text}")
+    return ", ".join(pieces)
+
+
+def _evidence_summary(evidence: dict[str, Any]) -> str:
+    summaries = [
+        summary
+        for summary in (_completeness_summary(evidence), _bad_marker_summary(evidence))
+        if summary
+    ]
+    return "; ".join(summaries)
+
+
 def planner_evidence_rows(edit_decisions: dict[str, Any]) -> list[dict[str, str]]:
     """Summarize local detector evidence carried into edit_decisions.json."""
     review = edit_decisions.get("cut_planner_review")
@@ -122,7 +154,7 @@ def planner_evidence_rows(edit_decisions: dict[str, Any]) -> list[dict[str, str]
                     "range": format_range(start, end),
                     "text": str(window.get("source_text", "")),
                     "reason": str(window.get("reason", "")),
-                    "summary": _completeness_summary(evidence),
+                    "summary": _evidence_summary(evidence),
                 }
             )
     return rows

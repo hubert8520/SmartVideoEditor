@@ -102,6 +102,25 @@ def _completeness_evidence(completeness: AttemptCompleteness) -> dict[str, objec
     }
 
 
+def _words_evidence(
+    words: list[TranscriptWord],
+    *,
+    include_completeness: bool = False,
+) -> dict[str, object]:
+    tokens = tuple(token for word in words if (token := _token(word)))
+    evidence: dict[str, object] = {
+        "text": _candidate_text(words),
+        "word_ids": [word.id for word in words],
+        "tokens": list(tokens),
+    }
+    if words:
+        evidence["start"] = words[0].timestamp
+        evidence["end"] = words[-1].end
+    if include_completeness:
+        evidence["completeness"] = _completeness_evidence(score_attempt_completeness(tokens))
+    return evidence
+
+
 def _span_evidence(span: AttemptSpan, completeness: AttemptCompleteness) -> dict[str, object]:
     return {
         "text": span.text,
@@ -146,6 +165,39 @@ def _prefix_attempt_evidence(
             "word_ids": [word.id for word in later_words],
             "tokens": list(later_tokens),
             "completeness": _completeness_evidence(score_attempt_completeness(later_tokens)),
+        },
+    }
+
+
+def _bad_marker_evidence(
+    words: list[TranscriptWord],
+    *,
+    candidate_words: list[TranscriptWord],
+    failed_take_words: list[TranscriptWord],
+    marker_words: list[TranscriptWord],
+    marker_phrases: tuple[tuple[str, ...], ...],
+    restart: tuple[int, int] | None,
+    strong_retake_marker: bool,
+    max_restart_preview_words: int,
+) -> dict[str, object]:
+    restart_words: list[TranscriptWord] = []
+    restart_prefix_word_count = 0
+    if restart is not None:
+        restart_index, restart_prefix_word_count = restart
+        preview_end = min(len(words), restart_index + max_restart_preview_words)
+        restart_words = words[restart_index:preview_end]
+
+    return {
+        "candidate": _words_evidence(candidate_words, include_completeness=True),
+        "failed_take": _words_evidence(failed_take_words, include_completeness=True),
+        "marker": _words_evidence(marker_words),
+        "marker_phrases": [" ".join(phrase) for phrase in marker_phrases],
+        "strong_retake_marker": strong_retake_marker,
+        "has_failed_take_context": bool(failed_take_words),
+        "restart": {
+            "confirmed": restart is not None,
+            "prefix_word_count": restart_prefix_word_count,
+            **_words_evidence(restart_words, include_completeness=True),
         },
     }
 
@@ -566,6 +618,12 @@ def detect_bad_marker_takes(
             confidence = 0.68
             recommended_action = "REVIEW"
 
+        marker_words = words[index : marker_end_index + 1]
+        failed_take_words = (
+            words[start_index:index]
+            if candidate_words and int(candidate_words[0].id) < int(marker_words[0].id)
+            else []
+        )
         candidates.append(
             _make_candidate(
                 candidate_words,
@@ -573,6 +631,16 @@ def detect_bad_marker_takes(
                 reason=reason,
                 confidence=confidence,
                 recommended_action=recommended_action,
+                evidence=_bad_marker_evidence(
+                    words,
+                    candidate_words=candidate_words,
+                    failed_take_words=failed_take_words,
+                    marker_words=marker_words,
+                    marker_phrases=marker_phrases,
+                    restart=restart,
+                    strong_retake_marker=strong_retake_marker,
+                    max_restart_preview_words=max_restart_prefix_words + 4,
+                ),
             )
         )
 

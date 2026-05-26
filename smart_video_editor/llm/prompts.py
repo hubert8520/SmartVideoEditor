@@ -24,6 +24,9 @@ Najważniejsze zasady:
 - bad marker typu "kurwa", "jeszcze raz", "nie tak", "od początku", "stop"
   zwykle oznacza nieudany take; wskaż cały nieudany zakres tylko wtedy, gdy
   widać późniejszą pełną wersję,
+- jeśli bad_marker_take ma evidence.marker/evidence.failed_take/evidence.restart,
+  użyj tych pól do sprawdzenia, gdzie jest marker, jaki zakres jest nieudaną
+  próbą i czy restart został potwierdzony,
 - repetition removal ma usuwać wcześniejszą nieudaną próbę i zostawiać
   najlepszą albo ostatnią kompletną wersję,
 - jeśli local_candidate zawiera evidence.earlier/evidence.later z completeness,
@@ -51,6 +54,8 @@ Twoje zadanie:
 - oceń local_candidates jako kandydatów do DROP / REVIEW / REJECT,
 - użyj evidence.completeness, shared_prefix i later_extra_word_count, jeśli są
   dostępne, żeby wyjaśnić czy późniejsza wersja jest naprawdę kompletna,
+- dla bad_marker_take użyj evidence.marker, evidence.failed_take i
+  evidence.restart zamiast wycinać samo przekleństwo lub samą frazę "jeszcze raz",
 - zaproponuj drop_ranges tylko dla bezpiecznych, minimalnych zakresów,
 - zaproponuj review_ranges dla miejsc podejrzanych albo wymagających odsłuchu,
 - dodaj keep_notes dla fragmentów, których planner powinien chronić.
