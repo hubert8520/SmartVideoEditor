@@ -44,7 +44,11 @@ def test_repeated_take_prefix_candidate_keeps_fuller_later_take():
 
     candidates = detect_local_candidates(words)
 
-    repeated = [candidate for candidate in candidates if candidate.category == "repeated_take"]
+    repeated = [
+        candidate
+        for candidate in candidates
+        if candidate.category in {"repeated_take", "repeated_attempt"}
+    ]
     assert repeated
     assert repeated[0].text == "Dzisiaj pokażę"
     assert repeated[0].recommended_action == "DROP"
