@@ -52,6 +52,12 @@ def test_bad_marker_cluster_drops_failed_take_only_when_restart_is_confirmed():
     assert markers[0].text == "dzisiaj pokazuje kampanie kurwa jeszcze raz"
     assert markers[0].reason == "bad_marker_failed_take_before_confirmed_restart"
     assert markers[0].recommended_action == "DROP"
+    assert markers[0].evidence["failed_take"]["text"] == "dzisiaj pokazuje kampanie"
+    assert markers[0].evidence["marker"]["text"] == "kurwa jeszcze raz"
+    assert markers[0].evidence["marker_phrases"] == ["kurwa", "jeszcze raz"]
+    assert markers[0].evidence["restart"]["confirmed"] is True
+    assert markers[0].evidence["restart"]["prefix_word_count"] == 3
+    assert markers[0].evidence["restart"]["text"] == "dzisiaj pokazuje kampanie poprawnie"
 
 
 def test_bad_marker_cluster_keeps_filler_between_marker_words():
@@ -73,6 +79,9 @@ def test_lone_profanity_without_restart_is_review_not_failed_take_drop():
     assert markers[0].text == "kurwa"
     assert markers[0].reason == "ambiguous_bad_marker_without_confirmed_restart"
     assert markers[0].recommended_action == "REVIEW"
+    assert markers[0].evidence["has_failed_take_context"] is False
+    assert markers[0].evidence["marker"]["text"] == "kurwa"
+    assert markers[0].evidence["restart"]["confirmed"] is False
 
 
 def test_retake_marker_without_successful_restart_is_review():
@@ -84,6 +93,10 @@ def test_retake_marker_without_successful_restart_is_review():
     assert markers[0].text == "ustawiam kampanie jeszcze raz"
     assert markers[0].reason == "bad_marker_failed_take_without_confirmed_restart"
     assert markers[0].recommended_action == "REVIEW"
+    assert markers[0].evidence["strong_retake_marker"] is True
+    assert markers[0].evidence["failed_take"]["text"] == "ustawiam kampanie"
+    assert markers[0].evidence["marker"]["text"] == "jeszcze raz"
+    assert markers[0].evidence["restart"]["confirmed"] is False
 
 
 def test_bad_marker_does_not_expand_across_previous_take_pause():

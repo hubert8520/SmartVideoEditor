@@ -100,6 +100,17 @@ def test_planner_records_local_candidate_evidence():
     assert repeated_attempt["evidence"]["later"]["completeness"]["is_complete"] is True
 
 
+def test_planner_records_bad_marker_evidence():
+    words = make_words("ustawiam kampanię kurwa jeszcze raz ustawiam kampanię poprawnie")
+
+    result = plan_with_local_detectors(words)
+    marker = next(window for window in result.applied_windows if window["category"] == "bad_marker_take")
+
+    assert marker["evidence"]["failed_take"]["text"] == "ustawiam kampanię"
+    assert marker["evidence"]["marker"]["text"] == "kurwa jeszcze raz"
+    assert marker["evidence"]["restart"]["confirmed"] is True
+
+
 def test_planner_reviews_repeated_attempt_when_later_take_is_incomplete():
     words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak to")
 

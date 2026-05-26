@@ -180,6 +180,49 @@ def test_editor_review_markdown_can_include_planner_evidence(tmp_path: Path):
     assert "ends_with_incomplete_token" in markdown
 
 
+def test_editor_review_summarizes_bad_marker_evidence(tmp_path: Path):
+    report = {"status": "pass", "issues": [], "overall_notes": ""}
+    edit_decisions = {
+        "cut_planner_review": {
+            "applied_windows": [
+                {
+                    "candidate_start": "00:00:00:000",
+                    "candidate_end": "00:00:01:500",
+                    "category": "bad_marker_take",
+                    "source_text": "ustawiam kampanie kurwa jeszcze raz",
+                    "reason": "bad_marker_failed_take_before_confirmed_restart",
+                    "evidence": {
+                        "failed_take": {"text": "ustawiam kampanie"},
+                        "marker": {"text": "kurwa jeszcze raz"},
+                        "restart": {
+                            "confirmed": True,
+                            "prefix_word_count": 2,
+                            "text": "ustawiam kampanie poprawnie",
+                        },
+                    },
+                }
+            ]
+        }
+    }
+    markdown_path = tmp_path / "review.md"
+
+    evidence = planner_evidence_rows(edit_decisions)
+    write_editor_review_markdown(
+        markdown_path,
+        [],
+        report,
+        "edited/edited_video.mp4",
+        "raw/source.mp4",
+        make_clips=False,
+        planner_evidence=evidence,
+    )
+
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert evidence[0]["summary"].startswith("marker=kurwa jeszcze raz")
+    assert "restart_confirmed=True" in markdown
+    assert "ustawiam kampanie poprawnie" in markdown
+
+
 def test_review_summary_counts_actions():
     rows = [
         {"actionability": "auto_repair_candidate", "raw_ranges": [1]},
