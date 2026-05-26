@@ -79,6 +79,18 @@ def test_attempt_group_reviews_when_later_attempt_is_still_incomplete():
     assert candidates[0].recommended_action == "REVIEW"
 
 
+def test_repeated_attempt_candidate_carries_completeness_evidence():
+    words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak ustawić kampanię")
+
+    candidates = repeated_attempt_candidates(words)
+    evidence = candidates[0].evidence
+
+    assert evidence["later_extra_word_count"] == 3
+    assert evidence["earlier"]["completeness"]["is_complete"] is False
+    assert "ends_with_incomplete_token" in evidence["earlier"]["completeness"]["markers"]
+    assert evidence["later"]["completeness"]["is_complete"] is True
+
+
 def test_attempt_group_reviews_possible_rhetorical_repeat():
     words = make_words("to jest ważne to jest ważne dla mnie")
 

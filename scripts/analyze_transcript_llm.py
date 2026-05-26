@@ -513,21 +513,22 @@ def local_candidates_for_prompt(transcript: dict[str, Any]) -> list[dict[str, An
     domain_words = normalize_words_payload(transcript["words"])
     candidates = []
     for index, candidate in enumerate(detect_local_candidates(domain_words), start=1):
-        candidates.append(
-            {
-                "id": f"local-{index:03d}",
-                "category": candidate.category,
-                "recommended_action": candidate.recommended_action,
-                "confidence": candidate.confidence,
-                "start_word_id": candidate.start_word_id,
-                "end_word_id": candidate.end_word_id,
-                "start": seconds_to_timestamp(candidate.start),
-                "end": seconds_to_timestamp(candidate.end),
-                "text": candidate.text,
-                "reason": candidate.reason,
-                "source": candidate.source,
-            }
-        )
+        record = {
+            "id": f"local-{index:03d}",
+            "category": candidate.category,
+            "recommended_action": candidate.recommended_action,
+            "confidence": candidate.confidence,
+            "start_word_id": candidate.start_word_id,
+            "end_word_id": candidate.end_word_id,
+            "start": seconds_to_timestamp(candidate.start),
+            "end": seconds_to_timestamp(candidate.end),
+            "text": candidate.text,
+            "reason": candidate.reason,
+            "source": candidate.source,
+        }
+        if candidate.evidence:
+            record["evidence"] = candidate.evidence
+        candidates.append(record)
     return candidates
 
 

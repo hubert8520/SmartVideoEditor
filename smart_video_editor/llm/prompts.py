@@ -26,6 +26,9 @@ Najważniejsze zasady:
   widać późniejszą pełną wersję,
 - repetition removal ma usuwać wcześniejszą nieudaną próbę i zostawiać
   najlepszą albo ostatnią kompletną wersję,
+- jeśli local_candidate zawiera evidence.earlier/evidence.later z completeness,
+  traktuj te pola jako dowód pomocniczy: DROP jest bezpieczny tylko wtedy, gdy
+  wcześniejsza próba wygląda na niedokończoną, a późniejsza ma kompletną wersję,
 - partial repeat typu "jak skonfi... jak skonfigurować" powinien usuwać tylko
   wcześniejszą urwaną próbę, jeśli word_id pozwalają na bezpieczne cięcie,
 - noise poza sensowną mową może być kandydatem drop, ale noise nachodzący na
@@ -46,6 +49,8 @@ Twoje zadanie:
 - wyznacz thought_blocks, czyli pełne jednostki sensu chronione przed
   przypadkowym rozcięciem,
 - oceń local_candidates jako kandydatów do DROP / REVIEW / REJECT,
+- użyj evidence.completeness, shared_prefix i later_extra_word_count, jeśli są
+  dostępne, żeby wyjaśnić czy późniejsza wersja jest naprawdę kompletna,
 - zaproponuj drop_ranges tylko dla bezpiecznych, minimalnych zakresów,
 - zaproponuj review_ranges dla miejsc podejrzanych albo wymagających odsłuchu,
 - dodaj keep_notes dla fragmentów, których planner powinien chronić.

@@ -234,6 +234,7 @@ def main() -> None:
         relative_label(args.edited_video),
         relative_label(raw_video),
         make_clips=args.make_clips,
+        planner_evidence=review_reporting.planner_evidence_rows(edit_decisions),
     )
     review_reporting.write_editor_review_csv(
         args.output_csv,

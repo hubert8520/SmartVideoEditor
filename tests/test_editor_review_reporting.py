@@ -4,6 +4,7 @@ from pathlib import Path
 
 from smart_video_editor.reporting.editor_review import (
     build_editor_review_rows,
+    planner_evidence_rows,
     review_summary,
     write_editor_review_csv,
     write_editor_review_markdown,
@@ -126,6 +127,57 @@ def test_editor_review_outputs_markdown_and_csv_with_repair_columns(tmp_path: Pa
     assert csv_rows[0]["akcja_qa"] == "manual_review"
     assert csv_rows[0]["status_naprawy"] == "manual_review"
     assert csv_rows[0]["kontekst_raw"] == "dziala kampania"
+
+
+def test_editor_review_markdown_can_include_planner_evidence(tmp_path: Path):
+    report = {"status": "pass", "issues": [], "overall_notes": ""}
+    edit_decisions = {
+        "cut_planner_review": {
+            "review_windows": [
+                {
+                    "candidate_start": "00:00:00:000",
+                    "candidate_end": "00:00:01:000",
+                    "category": "repeated_attempt",
+                    "source_text": "Dzisiaj pokażę wam",
+                    "reason": "later_attempt_also_incomplete_needs_review",
+                    "evidence": {
+                        "earlier": {
+                            "completeness": {
+                                "score": 0.2,
+                                "is_complete": False,
+                                "markers": ["ends_with_incomplete_token"],
+                            }
+                        },
+                        "later": {
+                            "completeness": {
+                                "score": 0.5,
+                                "is_complete": False,
+                                "markers": ["ends_with_incomplete_token"],
+                            }
+                        },
+                    },
+                }
+            ]
+        }
+    }
+    markdown_path = tmp_path / "review.md"
+
+    evidence = planner_evidence_rows(edit_decisions)
+    write_editor_review_markdown(
+        markdown_path,
+        [],
+        report,
+        "edited/edited_video.mp4",
+        "raw/source.mp4",
+        make_clips=False,
+        planner_evidence=evidence,
+    )
+
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert evidence[0]["action"] == "REVIEW"
+    assert "Dowody plannera" in markdown
+    assert "later_attempt_also_incomplete_needs_review" in markdown
+    assert "ends_with_incomplete_token" in markdown
 
 
 def test_review_summary_counts_actions():
