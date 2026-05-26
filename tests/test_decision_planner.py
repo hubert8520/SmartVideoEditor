@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 
 from smart_video_editor.domain.models import TranscriptWord
-from smart_video_editor.planning.decision_planner import PlannerCandidate, plan_candidates
+from smart_video_editor.planning.decision_planner import (
+    PlannerCandidate,
+    plan_candidates,
+    plan_drop_windows,
+)
 from smart_video_editor.text import normalize_text
 
 
@@ -37,6 +41,22 @@ def plan(candidates: list[PlannerCandidate], words: list[TranscriptWord]):
     )
 
 
+def plan_with_local_detectors(words: list[TranscriptWord]):
+    return plan_drop_windows(
+        entries=[],
+        partial_drop_windows=[],
+        words=words,
+        silences=[],
+        thought_blocks=[],
+        llm_summary=SimpleNamespace(keep_notes=[]),
+        duration=words[-1].end + 1.0,
+        cut_safety_margin=0.04,
+        silence_snap_window=0.0,
+        context_words=4,
+        disable_boundary_validator=False,
+    )
+
+
 def test_planner_approves_safe_partial_repeat_candidate():
     words = make_words("jak skonfi jak skonfigurować kampanię")
     candidate = PlannerCandidate(
@@ -56,6 +76,26 @@ def test_planner_approves_safe_partial_repeat_candidate():
     assert not result.blocked_windows
     assert result.drop_windows
     assert "jak skonfigurować kampanię" in result.simulated_text
+
+
+def test_planner_applies_local_repeated_attempt_candidate():
+    words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak ustawić kampanię")
+
+    result = plan_with_local_detectors(words)
+
+    assert any(window["category"] == "repeated_attempt" for window in result.applied_windows)
+    assert result.drop_windows
+    assert result.simulated_text == "Dzisiaj pokażę wam jak ustawić kampanię"
+
+
+def test_planner_reviews_rhetorical_repeat_candidate_without_cutting():
+    words = make_words("to jest ważne to jest ważne dla mnie")
+
+    result = plan_with_local_detectors(words)
+
+    assert not result.applied_windows
+    assert not result.drop_windows
+    assert any(window["category"] == "repeated_attempt" for window in result.review_windows)
 
 
 def test_planner_blocks_removed_logical_connector():

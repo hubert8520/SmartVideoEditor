@@ -7,9 +7,13 @@ accept, downgrade to REVIEW, or reject after boundary validation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from smart_video_editor.domain.models import TranscriptWord
+from smart_video_editor.segmentation.attempts import (
+    classify_repeated_attempt,
+    find_repeated_attempt_groups,
+)
 from smart_video_editor.segmentation.takes import segment_take_indices
 from smart_video_editor.text import normalize_text
 
@@ -96,8 +100,9 @@ def _contains(left: EditCandidate, right: EditCandidate) -> bool:
 
 def _candidate_rank(candidate: EditCandidate) -> tuple[int, int, float, int]:
     category_rank = {
-        "bad_marker_take": 4,
-        "partial_repeat": 3,
+        "bad_marker_take": 5,
+        "partial_repeat": 4,
+        "repeated_attempt": 3,
         "repeated_take": 2,
     }.get(candidate.category, 1)
     action_rank = 1 if candidate.recommended_action == "DROP" else 0
@@ -365,14 +370,22 @@ def detect_repeated_take_prefixes(
                 if not has_fuller_continuation:
                     continue
 
+                later_extra = sum(1 for token in tokens[repeat_index + phrase_len : search_end] if token)
+                boundary_gap = words[repeat_index].timestamp - words[end_index - 1].end
+                action, reason, confidence = classify_repeated_attempt(
+                    tuple(phrase),
+                    shared_prefix_word_count=phrase_len,
+                    later_extra_word_count=later_extra,
+                    boundary_gap=boundary_gap,
+                )
                 candidate_words = words[start_index:end_index]
                 candidates.append(
                     _make_candidate(
                         candidate_words,
                         category="repeated_take",
-                        reason="earlier_take_is_prefix_of_later_fuller_take",
-                        confidence=0.88,
-                        recommended_action="DROP",
+                        reason=reason,
+                        confidence=confidence,
+                        recommended_action=action,
                     )
                 )
                 break
@@ -380,6 +393,23 @@ def detect_repeated_take_prefixes(
                 continue
             break
 
+    return _dedupe(candidates)
+
+
+def detect_repeated_attempts(words: list[TranscriptWord]) -> list[EditCandidate]:
+    """Find repeated spoken attempts and classify uncertain repeats as REVIEW."""
+    candidates: list[EditCandidate] = []
+    for group in find_repeated_attempt_groups(words):
+        candidate_words = words[group.earlier.start_index : group.earlier.end_index + 1]
+        candidates.append(
+            _make_candidate(
+                candidate_words,
+                category="repeated_attempt",
+                reason=group.reason,
+                confidence=group.confidence,
+                recommended_action=cast(CandidateAction, group.recommended_action),
+            )
+        )
     return _dedupe(candidates)
 
 
@@ -479,6 +509,7 @@ def detect_local_candidates(words: list[TranscriptWord]) -> list[EditCandidate]:
         [
             *detect_partial_repeats(words),
             *detect_truncated_word_restarts(words),
+            *detect_repeated_attempts(words),
             *detect_repeated_take_prefixes(words),
             *detect_bad_marker_takes(words),
         ]
