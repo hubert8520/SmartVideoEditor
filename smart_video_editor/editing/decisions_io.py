@@ -96,6 +96,7 @@ def write_decisions(
             for block in thought_blocks
         ],
         "cut_planner_review": {
+            "candidate_inventory": getattr(planner_result, "candidate_inventory", []),
             "applied_windows": planner_result.applied_windows,
             "blocked_windows": planner_result.blocked_windows,
             "review_windows": getattr(planner_result, "review_windows", []),
