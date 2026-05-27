@@ -123,6 +123,43 @@ def test_bad_marker_can_confirm_restart_after_pause():
     assert markers[0].recommended_action == "DROP"
 
 
+def test_isolated_noise_marker_is_drop_candidate_with_gap_evidence():
+    words = make_words("intro kaszel dalej", gaps={0: 0.7, 1: 0.7})
+
+    noises = candidates_by_category(words, "noise_or_setup")
+
+    assert len(noises) == 1
+    assert noises[0].text == "kaszel"
+    assert noises[0].reason == "noise_marker_isolated_from_speech"
+    assert noises[0].recommended_action == "DROP"
+    assert noises[0].evidence["noise"]["text"] == "kaszel"
+    assert noises[0].evidence["previous_gap_seconds"] == 0.48
+    assert noises[0].evidence["next_gap_seconds"] == 0.48
+    assert noises[0].evidence["overlaps_speech_context"] is False
+
+
+def test_noise_marker_touching_speech_is_review_candidate():
+    words = make_words("intro kaszel dalej")
+
+    noises = candidates_by_category(words, "noise_or_setup")
+
+    assert len(noises) == 1
+    assert noises[0].text == "kaszel"
+    assert noises[0].reason == "noise_marker_overlaps_speech_context"
+    assert noises[0].recommended_action == "REVIEW"
+    assert noises[0].evidence["overlaps_speech_context"] is True
+
+
+def test_multiword_setup_noise_marker_is_detected():
+    words = make_words("start szuranie krzeslem dalej", gaps={0: 0.7, 2: 0.7})
+
+    noises = candidates_by_category(words, "noise_or_setup")
+
+    assert len(noises) == 1
+    assert noises[0].text == "szuranie krzeslem"
+    assert noises[0].evidence["marker_phrase"] == "szuranie krzeslem"
+
+
 def test_truncated_word_restart_without_repeated_starter_is_drop_candidate():
     words = make_words("jak skonfi skonfigurowac kampanie")
 

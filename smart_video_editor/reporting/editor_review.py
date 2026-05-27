@@ -114,10 +114,28 @@ def _bad_marker_summary(evidence: dict[str, Any]) -> str:
     return ", ".join(pieces)
 
 
+def _noise_summary(evidence: dict[str, Any]) -> str:
+    noise = evidence.get("noise")
+    if not isinstance(noise, dict):
+        return ""
+    noise_text = str(noise.get("text", ""))
+    pieces = [
+        f"noise={noise_text or 'brak'}",
+        f"overlaps_speech_context={bool(evidence.get('overlaps_speech_context'))}",
+        f"previous_gap={evidence.get('previous_gap_seconds')}",
+        f"next_gap={evidence.get('next_gap_seconds')}",
+    ]
+    return ", ".join(pieces)
+
+
 def _evidence_summary(evidence: dict[str, Any]) -> str:
     summaries = [
         summary
-        for summary in (_completeness_summary(evidence), _bad_marker_summary(evidence))
+        for summary in (
+            _completeness_summary(evidence),
+            _bad_marker_summary(evidence),
+            _noise_summary(evidence),
+        )
         if summary
     ]
     return "; ".join(summaries)

@@ -118,6 +118,37 @@ def bad_marker_transcript():
     }
 
 
+def noise_transcript():
+    words = ["intro", "kaszel", "dalej"]
+    gaps = {0: 0.7, 1: 0.7}
+    cursor = 0.0
+    payload_words = []
+    for index, word in enumerate(words):
+        payload_words.append(
+            {
+                "id": index,
+                "timestamp": f"00:00:{int(cursor):02d}:{int((cursor % 1) * 1000):03d}",
+                "end": f"00:00:{int(cursor + 0.2):02d}:{int(((cursor + 0.2) % 1) * 1000):03d}",
+                "word": word,
+            }
+        )
+        cursor += gaps.get(index, 0.35)
+    return {
+        "version": "2.0",
+        "source": {"provider": "deepgram", "word_level": True},
+        "segments": [
+            {
+                "id": 0,
+                "timestamp": payload_words[0]["timestamp"],
+                "end": payload_words[-1]["end"],
+                "transcription": " ".join(words),
+                "word_ids": [word["id"] for word in payload_words],
+            }
+        ],
+        "words": payload_words,
+    }
+
+
 def valid_decisions():
     return {
         "thought_blocks": [
@@ -205,6 +236,21 @@ def test_user_prompt_includes_bad_marker_evidence():
     assert marker["evidence"]["restart"]["confirmed"] is True
     assert "evidence.restart" in analyzer.USER_PROMPT_TEMPLATE
     assert "kurwa jeszcze raz" in prompt
+
+
+def test_user_prompt_includes_noise_evidence():
+    analyzer = load_analyzer()
+    transcript = noise_transcript()
+
+    candidates = analyzer.local_candidates_for_prompt(transcript)
+    prompt = analyzer.build_user_prompt(transcript)
+    noise = next(candidate for candidate in candidates if candidate["category"] == "noise_or_setup")
+
+    assert noise["recommended_action"] == "DROP"
+    assert noise["evidence"]["noise"]["text"] == "kaszel"
+    assert noise["evidence"]["overlaps_speech_context"] is False
+    assert "evidence.noise" in analyzer.USER_PROMPT_TEMPLATE
+    assert "previous_gap_seconds" in prompt
 
 
 def test_validate_output_accepts_candidate_aware_schema():

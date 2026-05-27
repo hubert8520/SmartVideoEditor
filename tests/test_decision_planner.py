@@ -9,9 +9,16 @@ from smart_video_editor.planning.decision_planner import (
 from smart_video_editor.text import normalize_text
 
 
-def make_words(text: str, *, start: float = 0.0, step: float = 0.35) -> list[TranscriptWord]:
+def make_words(
+    text: str,
+    *,
+    start: float = 0.0,
+    step: float = 0.35,
+    gaps: dict[int, float] | None = None,
+) -> list[TranscriptWord]:
     words = []
     cursor = start
+    gaps = gaps or {}
     for index, raw_word in enumerate(text.split()):
         clean = raw_word.strip(".!,?…")
         words.append(
@@ -23,7 +30,7 @@ def make_words(text: str, *, start: float = 0.0, step: float = 0.35) -> list[Tra
                 normalized=normalize_text(clean),
             )
         )
-        cursor += step
+        cursor += gaps.get(index, step)
     return words
 
 
@@ -109,6 +116,27 @@ def test_planner_records_bad_marker_evidence():
     assert marker["evidence"]["failed_take"]["text"] == "ustawiam kampanię"
     assert marker["evidence"]["marker"]["text"] == "kurwa jeszcze raz"
     assert marker["evidence"]["restart"]["confirmed"] is True
+
+
+def test_planner_applies_isolated_noise_candidate():
+    words = make_words("intro kaszel dalej", gaps={0: 0.7, 1: 0.7})
+
+    result = plan_with_local_detectors(words)
+    noise = next(window for window in result.applied_windows if window["category"] == "noise_or_setup")
+
+    assert noise["evidence"]["noise"]["text"] == "kaszel"
+    assert noise["evidence"]["overlaps_speech_context"] is False
+    assert result.simulated_text == "intro dalej"
+
+
+def test_planner_reviews_noise_touching_speech_without_cutting():
+    words = make_words("intro kaszel dalej")
+
+    result = plan_with_local_detectors(words)
+
+    assert not result.applied_windows
+    assert not result.drop_windows
+    assert any(window["category"] == "noise_or_setup" for window in result.review_windows)
 
 
 def test_planner_reviews_repeated_attempt_when_later_take_is_incomplete():

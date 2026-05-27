@@ -36,6 +36,8 @@ Najważniejsze zasady:
   wcześniejszą urwaną próbę, jeśli word_id pozwalają na bezpieczne cięcie,
 - noise poza sensowną mową może być kandydatem drop, ale noise nachodzący na
   mowę ma trafić do REVIEW.
+- jeśli noise_or_setup ma evidence.noise i gap evidence, DROP zatwierdzaj tylko
+  dla markerów odseparowanych od mowy; przy overlaps_speech_context użyj REVIEW.
 
 Dla każdego automatycznego drop podaj safety_basis: dlaczego cięcie jest
 bezpieczne, jaka pełna wersja zostaje i dlaczego nie zniszczy to naturalnego
@@ -56,6 +58,9 @@ Twoje zadanie:
   dostępne, żeby wyjaśnić czy późniejsza wersja jest naprawdę kompletna,
 - dla bad_marker_take użyj evidence.marker, evidence.failed_take i
   evidence.restart zamiast wycinać samo przekleństwo lub samą frazę "jeszcze raz",
+- dla noise_or_setup użyj evidence.noise, previous_gap_seconds,
+  next_gap_seconds i overlaps_speech_context, żeby odróżnić izolowany hałas od
+  hałasu nachodzącego na mowę,
 - zaproponuj drop_ranges tylko dla bezpiecznych, minimalnych zakresów,
 - zaproponuj review_ranges dla miejsc podejrzanych albo wymagających odsłuchu,
 - dodaj keep_notes dla fragmentów, których planner powinien chronić.
