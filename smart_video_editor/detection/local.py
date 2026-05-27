@@ -34,6 +34,19 @@ BAD_MARKER_PHRASES: tuple[tuple[str, ...], ...] = (
     ("stop",),
     ("pomylilem", "sie"),
 )
+NOISE_MARKER_PHRASES: tuple[tuple[str, ...], ...] = (
+    ("kaszel",),
+    ("kaszlniecie",),
+    ("chrzakniecie",),
+    ("chrzakanie",),
+    ("szuranie",),
+    ("szuranie", "krzeslem"),
+    ("szuranie", "krzesla"),
+    ("stuk",),
+    ("stukniecie",),
+    ("mlask",),
+    ("mlaskniecie",),
+)
 COMMON_STARTERS = {"a", "ale", "bo", "czyli", "i", "jak", "no", "to", "wiec", "więc", "zeby", "żeby"}
 FILLER_TOKENS = {"e", "em", "eee", "yyy", "hmm", "mhm", "no", "dobra", "znaczy"}
 STRONG_RETAKE_MARKERS = {
@@ -202,6 +215,30 @@ def _bad_marker_evidence(
     }
 
 
+def _noise_marker_evidence(
+    words: list[TranscriptWord],
+    *,
+    marker_start_index: int,
+    marker_end_index: int,
+    marker_phrase: tuple[str, ...],
+    previous_gap: float | None,
+    next_gap: float | None,
+    overlaps_speech_context: bool,
+    context_words: int,
+) -> dict[str, object]:
+    before_words = words[max(0, marker_start_index - context_words) : marker_start_index]
+    after_words = words[marker_end_index + 1 : marker_end_index + 1 + context_words]
+    return {
+        "noise": _words_evidence(words[marker_start_index : marker_end_index + 1]),
+        "marker_phrase": " ".join(marker_phrase),
+        "previous_gap_seconds": round(previous_gap, 3) if previous_gap is not None else None,
+        "next_gap_seconds": round(next_gap, 3) if next_gap is not None else None,
+        "overlaps_speech_context": overlaps_speech_context,
+        "before_context": _words_evidence(before_words),
+        "after_context": _words_evidence(after_words),
+    }
+
+
 def _is_prefix_token(fragment: str, full: str) -> bool:
     return len(fragment) >= 3 and fragment != full and full.startswith(fragment)
 
@@ -220,6 +257,7 @@ def _candidate_rank(candidate: EditCandidate) -> tuple[int, int, float, int]:
         "partial_repeat": 4,
         "repeated_attempt": 3,
         "repeated_take": 2,
+        "noise_or_setup": 2,
     }.get(candidate.category, 1)
     action_rank = 1 if candidate.recommended_action == "DROP" else 0
     length = candidate.end_word_id - candidate.start_word_id + 1
@@ -269,6 +307,17 @@ def _match_phrase(tokens: list[str], index: int) -> tuple[str, ...] | None:
     matches = [
         phrase
         for phrase in BAD_MARKER_PHRASES
+        if _phrase_at(tokens, index, phrase)
+    ]
+    if not matches:
+        return None
+    return max(matches, key=len)
+
+
+def _match_noise_phrase(tokens: list[str], index: int) -> tuple[str, ...] | None:
+    matches = [
+        phrase
+        for phrase in NOISE_MARKER_PHRASES
         if _phrase_at(tokens, index, phrase)
     ]
     if not matches:
@@ -647,6 +696,65 @@ def detect_bad_marker_takes(
     return _dedupe(candidates)
 
 
+def detect_noise_markers(
+    words: list[TranscriptWord],
+    *,
+    speech_overlap_gap: float = 0.25,
+    context_words: int = 3,
+) -> list[EditCandidate]:
+    """Find explicit transcript noise markers and keep overlaps in REVIEW."""
+    tokens = [_token(word) for word in words]
+    candidates: list[EditCandidate] = []
+    consumed_until = -1
+
+    for index in range(len(words)):
+        if index <= consumed_until:
+            continue
+        phrase = _match_noise_phrase(tokens, index)
+        if phrase is None:
+            continue
+
+        end_index = index + len(phrase) - 1
+        consumed_until = end_index
+        previous_gap = words[index].timestamp - words[index - 1].end if index > 0 else None
+        next_gap = words[end_index + 1].timestamp - words[end_index].end if end_index + 1 < len(words) else None
+        overlaps_speech_context = any(
+            gap is not None and gap < speech_overlap_gap
+            for gap in (previous_gap, next_gap)
+        )
+        if overlaps_speech_context:
+            reason = "noise_marker_overlaps_speech_context"
+            confidence = 0.7
+            recommended_action: CandidateAction = "REVIEW"
+        else:
+            reason = "noise_marker_isolated_from_speech"
+            confidence = 0.86
+            recommended_action = "DROP"
+
+        marker_words = words[index : end_index + 1]
+        candidates.append(
+            _make_candidate(
+                marker_words,
+                category="noise_or_setup",
+                reason=reason,
+                confidence=confidence,
+                recommended_action=recommended_action,
+                evidence=_noise_marker_evidence(
+                    words,
+                    marker_start_index=index,
+                    marker_end_index=end_index,
+                    marker_phrase=phrase,
+                    previous_gap=previous_gap,
+                    next_gap=next_gap,
+                    overlaps_speech_context=overlaps_speech_context,
+                    context_words=context_words,
+                ),
+            )
+        )
+
+    return _dedupe(candidates)
+
+
 def detect_local_candidates(words: list[TranscriptWord]) -> list[EditCandidate]:
     """Run all deterministic local detectors."""
     return _dedupe(
@@ -656,5 +764,6 @@ def detect_local_candidates(words: list[TranscriptWord]) -> list[EditCandidate]:
             *detect_repeated_attempts(words),
             *detect_repeated_take_prefixes(words),
             *detect_bad_marker_takes(words),
+            *detect_noise_markers(words),
         ]
     )

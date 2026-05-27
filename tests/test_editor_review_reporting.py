@@ -223,6 +223,46 @@ def test_editor_review_summarizes_bad_marker_evidence(tmp_path: Path):
     assert "ustawiam kampanie poprawnie" in markdown
 
 
+def test_editor_review_summarizes_noise_evidence(tmp_path: Path):
+    report = {"status": "pass", "issues": [], "overall_notes": ""}
+    edit_decisions = {
+        "cut_planner_review": {
+            "applied_windows": [
+                {
+                    "candidate_start": "00:00:00:700",
+                    "candidate_end": "00:00:00:900",
+                    "category": "noise_or_setup",
+                    "source_text": "kaszel",
+                    "reason": "noise_marker_isolated_from_speech",
+                    "evidence": {
+                        "noise": {"text": "kaszel"},
+                        "previous_gap_seconds": 0.48,
+                        "next_gap_seconds": 0.48,
+                        "overlaps_speech_context": False,
+                    },
+                }
+            ]
+        }
+    }
+    markdown_path = tmp_path / "review.md"
+
+    evidence = planner_evidence_rows(edit_decisions)
+    write_editor_review_markdown(
+        markdown_path,
+        [],
+        report,
+        "edited/edited_video.mp4",
+        "raw/source.mp4",
+        make_clips=False,
+        planner_evidence=evidence,
+    )
+
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert evidence[0]["summary"].startswith("noise=kaszel")
+    assert "overlaps_speech_context=False" in markdown
+    assert "previous_gap=0.48" in markdown
+
+
 def test_review_summary_counts_actions():
     rows = [
         {"actionability": "auto_repair_candidate", "raw_ranges": [1]},
