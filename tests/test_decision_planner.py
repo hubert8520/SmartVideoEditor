@@ -107,6 +107,25 @@ def test_planner_records_local_candidate_evidence():
     assert repeated_attempt["evidence"]["later"]["completeness"]["is_complete"] is True
 
 
+def test_planner_records_candidate_inventory_before_decisions():
+    words = make_words("Dzisiaj pokażę wam Dzisiaj pokażę wam jak ustawić kampanię")
+
+    result = plan_with_local_detectors(words)
+    inventory_item = next(
+        candidate
+        for candidate in result.candidate_inventory
+        if candidate["category"] == "repeated_attempt"
+    )
+    applied_item = next(
+        window for window in result.applied_windows if window["category"] == "repeated_attempt"
+    )
+
+    assert inventory_item["planner_candidate_id"] == applied_item["planner_candidate_id"]
+    assert inventory_item["candidate_index"] == applied_item["candidate_index"]
+    assert inventory_item["recommended_action"] == "DROP"
+    assert inventory_item["evidence"]["later"]["completeness"]["is_complete"] is True
+
+
 def test_planner_records_bad_marker_evidence():
     words = make_words("ustawiam kampanię kurwa jeszcze raz ustawiam kampanię poprawnie")
 

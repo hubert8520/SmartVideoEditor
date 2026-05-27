@@ -38,6 +38,7 @@ class PlannerCandidate:
 @dataclass(slots=True)
 class DecisionPlannerResult:
     drop_windows: list[tuple[float, float]]
+    candidate_inventory: list[dict[str, object]] = field(default_factory=list)
     applied_windows: list[dict[str, object]] = field(default_factory=list)
     blocked_windows: list[dict[str, object]] = field(default_factory=list)
     review_windows: list[dict[str, object]] = field(default_factory=list)
@@ -296,6 +297,25 @@ def _candidate_record(
     return record
 
 
+def _candidate_id(index: int) -> str:
+    return f"planner-{index:03d}"
+
+
+def _candidate_inventory_record(
+    index: int,
+    candidate: PlannerCandidate,
+    selected_words: list[Any],
+) -> dict[str, object]:
+    return _candidate_record(
+        candidate,
+        candidate.start,
+        candidate.end,
+        selected_words,
+        candidate_index=index,
+        planner_candidate_id=_candidate_id(index),
+    )
+
+
 def _candidate_boundary_issues(
     words: list[Any],
     planned_windows: list[tuple[float, float]],
@@ -346,9 +366,13 @@ def plan_candidates(
     applied: list[dict[str, object]] = []
     blocked: list[dict[str, object]] = []
     review: list[dict[str, object]] = []
+    candidate_inventory: list[dict[str, object]] = []
 
-    for candidate in candidates:
+    for candidate_index, candidate in enumerate(candidates, start=1):
         selected_words = _candidate_words(candidate, words, words_by_id)
+        candidate_inventory.append(
+            _candidate_inventory_record(candidate_index, candidate, selected_words)
+        )
         if candidate.recommended_action == "REVIEW":
             review.append(
                 _candidate_record(
@@ -356,6 +380,8 @@ def plan_candidates(
                     candidate.start,
                     candidate.end,
                     selected_words,
+                    candidate_index=candidate_index,
+                    planner_candidate_id=_candidate_id(candidate_index),
                     review_reason="candidate_marked_review",
                 )
             )
@@ -376,6 +402,8 @@ def plan_candidates(
                     candidate.start,
                     candidate.end,
                     selected_words,
+                    candidate_index=candidate_index,
+                    planner_candidate_id=_candidate_id(candidate_index),
                     block_reason=block_reason,
                 )
             )
@@ -391,6 +419,8 @@ def plan_candidates(
                         candidate.start,
                         candidate.end,
                         selected_words,
+                        candidate_index=candidate_index,
+                        planner_candidate_id=_candidate_id(candidate_index),
                         block_reason="boundary_validator",
                         boundary_issues=[
                             _boundary_issue_record(issue, words, context_words)
@@ -416,6 +446,8 @@ def plan_candidates(
                     start,
                     end,
                     selected_words,
+                    candidate_index=candidate_index,
+                    planner_candidate_id=_candidate_id(candidate_index),
                     block_reason="empty_or_invalid_range",
                 )
             )
@@ -442,6 +474,8 @@ def plan_candidates(
                     start,
                     end,
                     selected_words,
+                    candidate_index=candidate_index,
+                    planner_candidate_id=_candidate_id(candidate_index),
                     block_reason="boundary_validator",
                     boundary_issues=[
                         _boundary_issue_record(issue, words, context_words)
@@ -453,7 +487,16 @@ def plan_candidates(
 
         unmerged_planned.append((start, end))
         planned = merge_intervals(unmerged_planned)
-        applied.append(_candidate_record(candidate, start, end, selected_words))
+        applied.append(
+            _candidate_record(
+                candidate,
+                start,
+                end,
+                selected_words,
+                candidate_index=candidate_index,
+                planner_candidate_id=_candidate_id(candidate_index),
+            )
+        )
 
     boundary_issues: list[dict[str, object]] = []
     if words and not disable_boundary_validator:
@@ -461,6 +504,7 @@ def plan_candidates(
 
     return DecisionPlannerResult(
         drop_windows=planned,
+        candidate_inventory=candidate_inventory,
         applied_windows=applied,
         blocked_windows=blocked,
         review_windows=review,
