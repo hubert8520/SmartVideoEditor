@@ -1,53 +1,43 @@
 # Editor Review Reports
 
-Ten brief jest ostatnia warstwa pipeline'u, kiedy automatyczna naprawa nie
-powinna juz zgadywac. Ma pokazac montazyscie ten sam problem w czasie finalnym i
-w raw, razem z powodem decyzji QA.
+The editor brief is the final layer of the pipeline when automatic repair should stop making assumptions. It presents the same issue in final-video and source-media time, together with the QA rationale and repair status.
 
-## Wejscia
+## Inputs
 
-`scripts/generate_editor_review.py` czyta:
+`smart-video-editor review` reads:
 
-- `artifacts/final_quality_report*.json`,
-- `artifacts/edit_decisions*.json`,
-- `edited/edited_video*.mp4`,
-- raw video z pola `source_video` w edit decisions.
+- `artifacts/final_quality_report*.json`;
+- `artifacts/edit_decisions*.json`;
+- `edited/edited_video*.mp4`;
+- the source video referenced by `source_video` in the edit decisions.
 
-Raport QA po aktualnym etapie powinien zawierac:
+Current QA reports can contain:
 
-- `raw_ranges` - mapowanie problemu finalnego filmu na surowe nagranie,
-- `raw_context` - slowa z raw wokol problemu,
-- `repair_suggestion.action` - `force_keep`, `force_drop`, `manual_review` albo `no_auto_repair`,
-- `actionability` - czy problem jest zmapowany i czy wymaga review.
+- `raw_ranges`: mappings from final-video issues to the source recording;
+- `raw_context`: source transcript words around an issue;
+- `repair_suggestion.action`: `force_keep`, `force_drop`, `manual_review`, or `no_auto_repair`;
+- `actionability`: whether the issue is mapped and requires manual review.
 
-Jesli QA report pochodzi ze starszej wersji i nie ma `raw_ranges`, brief uzywa
-fallbacku przez `edit_decisions.timeline_map`.
+When an older QA report has no `raw_ranges`, the brief falls back to `edit_decisions.timeline_map`.
 
-## Wyniki
+## Outputs
 
-Skrypt zapisuje:
+The command writes:
 
-- `artifacts/editor_review*.md` - czytelny brief dla czlowieka,
-- `artifacts/editor_review*.csv` - arkusz do sortowania i checklisty,
-- opcjonalnie `artifacts/editor_review*_clips/`, gdy uzyjesz `--make-clips`.
+- `artifacts/editor_review*.md`: a human-readable review brief;
+- `artifacts/editor_review*.csv`: a sortable checklist;
+- optionally `artifacts/editor_review*_clips/` when `--make-clips` is enabled.
 
-## Pola w briefie
+## Report fields
 
-- `Akcja QA` mowi, co LLM uznal za najlepsza droge naprawy.
-- `Status naprawy` mowi, czy to kandydat do automatycznej naprawy, czy reczny
-  review.
-- `Pewnosc QA` pomaga sortowac ryzyko.
-- `Film edytowany` to dokladny zakres problemu w finalnym renderze.
-- `Raw do porownania` to odpowiadajacy zakres w oryginalnym nagraniu, z
-  marginesem do odsluchu.
-- `Kontekst raw` pokazuje slowa z surowego transcriptu wokol problemu.
-- `Instrukcja dla montazysty` tlumaczy, czy sprawdzic brakujacy lacznik,
-  powtorke/noise, czy po prostu odsluchac przed decyzja.
+- `QA action` records the repair path selected by QA.
+- `Repair status` distinguishes an automatic repair candidate from a manual decision.
+- `QA confidence` helps prioritize risk.
+- `Edited video` identifies the exact problem range in the final render.
+- `Source comparison` identifies the corresponding source range with listening margin.
+- `Source context` includes nearby words from the raw transcript.
+- `Instructions for the editor` explains whether to check a missing connector, repetition, noise, or an uncertain transition.
 
-## Zasada bezpieczenstwa
+## Safety rule
 
-Brief nie wykonuje montazu. Pokazuje tylko, dlaczego QA albo repair planner
-uwaza miejsce za bezpieczne do naprawy lub wymagajace review. Jesli decyzja jest
-niepewna, wynik powinien zostac przy `manual_review`, a nie wymuszac agresywne
-ciecie.
-
+The brief does not modify the edit. It explains why QA or the repair planner considers a location safe to repair or in need of review. Uncertain decisions must remain `manual_review` instead of forcing an aggressive cut.

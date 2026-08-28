@@ -1,368 +1,320 @@
-# SmartVideoEditor
+# Smart Video Editor
 
-Pipeline do automatycznej transkrypcji, analizy LLM, montażu i kontroli jakości surowego filmu.
+An AI-assisted command-line pipeline that turns raw talking-head footage into a tighter, reviewable edit.
 
-## 1. Przygotowanie środowiska
+Smart Video Editor combines word-level transcription, local candidate detection, semantic edit judgment, deterministic cut planning, FFmpeg rendering, and post-render quality assurance. It is designed for recordings where a speaker repeats takes, abandons sentences, uses filler words, or leaves setup noise and long pauses.
 
-Używaj lokalnego venv:
+The current detectors are optimized for Polish spoken content. Transcription supports configurable language codes, while the documentation, CLI, model instructions, and generated review reports are in English.
 
-```bash
-./venv/bin/python -m pip install -r requirements.txt
+## Why this project exists
+
+Editing an educational or marketing monologue is repetitive but risky. Removing silence is easy; removing the wrong half-sentence is also easy. This project separates detection, semantic judgment, deterministic planning, rendering, and QA so every proposed cut can be traced to transcript word IDs and source-video timestamps.
+
+The pipeline aims to be:
+
+- precise: edits are planned around word-level timestamps;
+- explainable: candidates carry evidence and every applied decision has a reason;
+- conservative: uncertain changes become review items instead of silent cuts;
+- recoverable: repair iterations always render from the original recording;
+- auditable: artifacts preserve decisions and final-to-source timeline mappings.
+
+## Pipeline
+
+```text
+raw media
+    |
+    v
+word-level transcription
+    |
+    v
+local candidate detection + semantic LLM judgment
+    |
+    v
+deterministic planner + boundary validation
+    |
+    v
+FFmpeg render
+    |
+    v
+post-render transcription + quality assurance
+    |
+    +---- pass ---------> final video
+    |
+    +---- review/fail --> bounded repair loop or editor brief
 ```
 
-Projekt korzysta z `imageio-ffmpeg`, więc nie musisz osobno instalować `ffmpeg` przez Homebrew.
+## Engineering highlights
 
-## 2. Klucze API
+- Deepgram and OpenAI transcription providers with word-level normalization.
+- First-class candidates for repeated attempts, failed-take markers, and isolated noise.
+- Attempt grouping and completeness evidence for partial and repeated takes.
+- Candidate-aware LLM decisions anchored to stable `word_id` ranges.
+- Protected thought blocks and boundary validation around planned joins.
+- Deterministic edit decision lists and timeline maps back to the source recording.
+- Actionable QA reports with `force_keep`, `force_drop`, `manual_review`, and `no_auto_repair` intents.
+- Conservative repair planning with bounded automatic refinement.
+- Human-readable Markdown and CSV review briefs with optional comparison clips.
+- Modular packages for detection, planning, editing, reporting, transcription, and media rendering.
 
-Sekrety trzymaj w pliku `.env`. Ten plik jest ignorowany przez Git.
+## Requirements
 
-Przykład:
+- Python 3.11 or newer
+- An OpenAI API key for semantic analysis and final quality assurance
+- A Deepgram API key for the default word-level transcription workflow
+
+FFmpeg is provided through `imageio-ffmpeg` when a system installation is unavailable.
+
+## Installation
+
+Create a virtual environment and install the project:
 
 ```bash
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install -e .
+```
+
+For development and tests, install the optional development dependencies:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Create the local environment file from the template and add your keys:
+
+```bash
+cp .env.example .env
+```
+
+```dotenv
 OPENAI_API_KEY=sk-...
 DEEPGRAM_API_KEY=...
 ```
 
-`DEEPGRAM_API_KEY` jest domyślnie używany do transkrypcji, bo Deepgram daje słowa z dokładnymi timestampami.
+The `.env` file, source media, generated artifacts, and rendered videos are excluded from Git.
 
-`OPENAI_API_KEY` jest używany do:
+## Quick start
 
-- analizy transkrypcji przez LLM,
-- opcjonalnej transkrypcji przez OpenAI,
-- kontroli jakości finalnego filmu po renderze.
-
-## 3. Plik wejściowy
-
-Wrzuć surowy film do folderu:
-
-```text
-raw/
-```
-
-Jeśli w folderze `raw/` jest tylko jeden plik wideo/audio, skrypty wybiorą go automatycznie.
-
-Jeśli jest kilka plików, podawaj nazwę:
+Initialize the runtime directories and check the environment without calling any API:
 
 ```bash
---video-name nazwa_pliku.mp4
+smart-video-editor init
+smart-video-editor doctor
 ```
 
-## 4. Transkrypcja word-level
-
-Domyślnie używaj Deepgram:
+Place one supported audio or video file in `raw/`, then run the complete pipeline:
 
 ```bash
-./venv/bin/python scripts/transcribe_video.py --language pl
+smart-video-editor run --language pl
 ```
 
-To jest równoważne:
+If `raw/` contains multiple media files, select one explicitly:
 
 ```bash
-./venv/bin/python scripts/transcribe_video.py --provider deepgram --language pl
+smart-video-editor run --video-name recording.mp4 --language pl
 ```
 
-Domyślny model Deepgram:
-
-```text
-nova-3
-```
-
-Z rozpoznawaniem mówców:
+Run automatic QA repairs after the first render:
 
 ```bash
-./venv/bin/python scripts/transcribe_video.py --language pl --diarize
+smart-video-editor run --video-name recording.mp4 --language pl --auto-refine
 ```
 
-OpenAI jest nadal dostępne:
-
-```bash
-./venv/bin/python scripts/transcribe_video.py --provider openai --language pl
-```
-
-Domyślny model OpenAI:
-
-```text
-whisper-1
-```
-
-`gpt-4o-transcribe` bez diarizacji zwraca zbyt grube segmenty do precyzyjnego montażu, więc skrypt blokuje ten wariant, chyba że jawnie dodasz `--allow-coarse-openai`.
-
-Wynik zapisuje się tutaj:
+The main outputs are:
 
 ```text
 artifacts/raw_transcription.json
-```
-
-Nowy format ma segmenty i słowa:
-
-```json
-{
-  "version": "2.0",
-  "source": {
-    "provider": "deepgram",
-    "model": "nova-3",
-    "word_level": true
-  },
-  "segments": [
-    {
-      "id": 0,
-      "timestamp": "00:00:01:040",
-      "end": "00:00:05:600",
-      "transcription": "Tekst wypowiedzi",
-      "word_ids": [0, 1, 2]
-    }
-  ],
-  "words": [
-    {
-      "id": 0,
-      "timestamp": "00:00:01:040",
-      "end": "00:00:01:260",
-      "word": "Tekst"
-    }
-  ]
-}
-```
-
-Stary format listy segmentów nadal jest czytany jako fallback, ale wtedy `word_id` są tylko syntetyczne. Do dobrego montażu zrób ponowną transkrypcję Deepgramem.
-
-## 5. Analiza transkrypcji przez LLM
-
-Ten krok używa OpenAI i tworzy decyzje montażowe na podstawie sensu wypowiedzi oraz `word_id`.
-
-Test bez użycia API:
-
-```bash
-./venv/bin/python scripts/analyze_transcript_llm.py --dry-run
-```
-
-Właściwa analiza:
-
-```bash
-./venv/bin/python scripts/analyze_transcript_llm.py
-```
-
-Domyślny model:
-
-```text
-gpt-5.2
-```
-
-Wynik:
-
-```text
 artifacts/llm_edit_decisions.json
-```
-
-Ten plik zawiera m.in.:
-
-- `thought_blocks` - pełne jednostki sensu, których planner nie powinien przypadkowo rozcinać,
-- `drop_ranges` - fragmenty do wycięcia, z `start_word_id` i `end_word_id`,
-- `review_ranges` - fragmenty do ręcznego sprawdzenia,
-- `keep_notes` - fragmenty, których raczej nie należy usuwać,
-- `overall_notes` - ogólne uwagi o nagraniu.
-
-## 6. Montaż filmu
-
-```bash
-./venv/bin/python scripts/edit_video.py --padding 0.05
-```
-
-`--padding` oznacza, ile sekund zostawić przed i po zachowanej kwestii.
-
-Edytor:
-
-- automatycznie używa `artifacts/llm_edit_decisions.json`, jeśli plik istnieje,
-- traktuje lokalne heurystyki jako review, a nie jako automatyczne cięcia, chyba że dodasz `--allow-heuristic-drops`,
-- chroni `thought_blocks`, `keep_notes`, nagłówki sekcji i podejrzane sklejenia,
-- planuje cięcia po granicach słów,
-- buduje keepy z maski słów, więc kaszel/odchrząknięcie/szuranie bez rozpoznanych słów zwykle wypada z filmu,
-- używa krótszego ogona dla krótkich bloków typu `Punkt pierwszy`,
-- przy krótkich nagłówkach i elementach struktury szuka też bardzo krótkiej ciszy po ostatnim słowie i przycina ogon do tej ciszy, żeby usuwać odchrząknięcia po frazie,
-- dodaje mały margines bezpieczeństwa wokół wycinanych słów, ale nie pozwala mu wejść w sąsiednie słowo,
-- snapuje cięcia do pobliskiej ciszy tylko wtedy, gdy nie narusza to granic słów,
-- domyślnie buduje film z zakresów transkrypcji, więc dźwięki bez tekstu nie są zachowywane tylko dlatego, że ffmpeg wykrył tam "nie-ciszę",
-- po renderze próbuje uruchomić kontrolę jakości finalnego filmu.
-
-Dry-run bez renderowania:
-
-```bash
-./venv/bin/python scripts/edit_video.py --padding 0.05 --dry-run
-```
-
-Przydatne opcje:
-
-```bash
-# Zignoruj decyzje LLM
-./venv/bin/python scripts/edit_video.py --ignore-llm-decisions
-
-# Zmień minimalną pewność automatycznych cięć LLM
-./venv/bin/python scripts/edit_video.py --llm-min-confidence 0.85
-
-# Zmień margines wokół słów wycinanych przez planner
-./venv/bin/python scripts/edit_video.py --cut-safety-margin 0.08
-
-# Dostosuj maskę słów i ogon po krótkich blokach
-./venv/bin/python scripts/edit_video.py --word-head-padding 0.05 --word-tail-padding 0.06 --short-block-tail-padding 0.02
-
-# Dostosuj przycinanie ogona krótkich nagłówków/elementów struktury do krótkiej ciszy
-./venv/bin/python scripts/edit_video.py --short-block-silence-min-duration 0.08 --short-block-silence-window 0.45 --short-block-min-spoken-before-trim 0.25
-
-# Wyłącz przycinanie krótkich nagłówków/elementów struktury do krótkiej ciszy
-./venv/bin/python scripts/edit_video.py --disable-short-block-silence-trim
-
-# Wyłącz maskę słów i wróć do paddingu całych interwałów
-./venv/bin/python scripts/edit_video.py --disable-word-mask
-
-# Pozwól starym heurystykom robić automatyczne cięcia
-./venv/bin/python scripts/edit_video.py --allow-heuristic-drops
-
-# Wyłącz walidator granic myśli
-./venv/bin/python scripts/edit_video.py --disable-boundary-validator
-
-# Wróć do starego trybu opartego głównie o nie-ciszę z audio
-./venv/bin/python scripts/edit_video.py --keep-source audio
-
-# Nie uruchamiaj kontroli jakości po renderze
-./venv/bin/python scripts/edit_video.py --skip-quality-check
-```
-
-Wyniki:
-
-```text
 artifacts/edit_decisions.json
+artifacts/edited_transcription.json
+artifacts/final_quality_report.json
 edited/edited_video.mp4
 ```
 
-Każdy `edit_decisions*.json` zawiera też `timeline_map`, czyli mapę czasu finalnego filmu na czas w surowym nagraniu. Dzięki temu kolejne poprawki zawsze renderują od nowa z pliku w `raw/`, a nie z już pociętego filmu.
+## CLI commands
 
-## 7. Kontrola jakości finalnego filmu
+| Command | Purpose |
+| --- | --- |
+| `init` | Create `raw/`, `artifacts/`, and `edited/`. |
+| `doctor` | Check `.env`, FFmpeg, raw media, and API-key presence without API calls. |
+| `run` | Execute transcription, analysis, rendering, QA, and optional refinement. |
+| `transcribe` | Create a word-level transcript from source media. |
+| `analyze` | Detect local candidates and generate semantic edit decisions. |
+| `edit` | Plan cuts, render the video, and optionally run QA. |
+| `quality` | Run post-render transcription and quality assurance. |
+| `repair` | Build a conservative repair plan from a QA report. |
+| `refine` | Run bounded repair, render, and QA iterations. |
+| `review` | Generate Markdown and CSV instructions for manual review. |
 
-`edit_video.py` próbuje uruchomić ten krok automatycznie po renderze. Możesz też odpalić go ręcznie:
-
-```bash
-./venv/bin/python scripts/quality_check_edited_video.py --language pl
-```
-
-Ten skrypt:
-
-- transkrybuje `edited/edited_video.mp4`, domyślnie Deepgramem,
-- zapisuje `artifacts/edited_transcription.json`,
-- wysyła finalną transkrypcję do LLM,
-- zapisuje raport w `artifacts/final_quality_report.json`,
-- mapuje każdy problem z czasu finalnego filmu na `raw_ranges` z `timeline_map`,
-- dodaje `repair_suggestion` (`force_keep`, `force_drop`, `manual_review` albo `no_auto_repair`) i `actionability`.
-
-Raport wykrywa m.in. urwane słowa, niepotrzebne powtórzenia, zawieszone myśli i nielogiczne przejścia.
-
-## 8. Iteracyjna naprawa po QA
-
-Jeśli `final_quality_report.json` ma status `fail` albo `needs_review`, wygeneruj plan napraw:
+Stage-specific arguments are forwarded to the underlying implementation:
 
 ```bash
-./venv/bin/python scripts/repair_from_quality_report.py
+smart-video-editor transcribe --help
+smart-video-editor edit --help
+smart-video-editor review --help
 ```
 
-Wynik:
+The original `python scripts/<stage>.py` entry points remain supported.
+
+## Workspaces and resuming
+
+Run against a different workspace without changing directories:
+
+```bash
+smart-video-editor --workspace /path/to/project run --language pl
+```
+
+Resume after a completed transcription:
+
+```bash
+smart-video-editor run --from-stage analyze --language pl
+```
+
+Resume directly from existing transcript and LLM decision artifacts:
+
+```bash
+smart-video-editor run --from-stage edit --language pl
+```
+
+Generate edit decisions without rendering the video:
+
+```bash
+smart-video-editor run --language pl --plan-only
+```
+
+`--plan-only` still runs API-backed transcription and semantic analysis when starting from those stages.
+
+## Individual stages
+
+### Transcription
+
+Deepgram `nova-3` is the default because precise word timestamps are essential for editing:
+
+```bash
+smart-video-editor transcribe --provider deepgram --language pl
+```
+
+OpenAI transcription and speaker diarization remain available:
+
+```bash
+smart-video-editor transcribe --provider openai --language pl
+smart-video-editor transcribe --language pl --diarize
+```
+
+### Semantic analysis
+
+Validate the transcript and estimate request size without calling the API:
+
+```bash
+smart-video-editor analyze --dry-run
+```
+
+Generate candidate-aware edit decisions:
+
+```bash
+smart-video-editor analyze
+```
+
+The result contains protected `thought_blocks`, safe `drop_ranges`, uncertain `review_ranges`, `keep_notes`, local candidate evidence, and explicit safety explanations.
+
+### Planning and rendering
+
+Inspect the planned edit without rendering:
+
+```bash
+smart-video-editor edit --padding 0.05 --dry-run
+```
+
+Render the edit and run post-render QA:
+
+```bash
+smart-video-editor edit --padding 0.05 --quality-language pl
+```
+
+Useful safety and tuning options:
+
+```bash
+# Ignore semantic decisions and inspect local candidates only.
+smart-video-editor edit --ignore-llm-decisions --dry-run
+
+# Allow local heuristics to create automatic cuts.
+smart-video-editor edit --allow-heuristic-drops
+
+# Raise the minimum confidence for automatic LLM cuts.
+smart-video-editor edit --llm-min-confidence 0.85
+
+# Disable automatic post-render quality assurance.
+smart-video-editor edit --skip-quality-check
+```
+
+### Repair and review
+
+Run bounded repair iterations from the original source media:
+
+```bash
+smart-video-editor refine --quality-language pl
+```
+
+Generate a review brief when an issue still needs a human decision:
+
+```bash
+smart-video-editor review --make-clips
+```
+
+The brief includes final and source time ranges, QA intent, repair status, confidence, evidence, source-word context, and optional comparison clips. See [Editor Review Reports](docs/editor_review_reports.md) for the report contract.
+
+## Architecture
 
 ```text
-artifacts/repair_plan.json
+smart_video_editor/
+  cli/             unified CLI and edit orchestration
+  detection/       local candidate detection
+  domain/          shared candidate and decision models
+  editing/         runtime paths, decision I/O, intervals, and QA orchestration
+  llm/             semantic-analysis and QA prompts
+  media/           FFmpeg rendering helpers
+  planning/        decision planner, boundaries, and edit decision lists
+  reporting/       timeline mapping, actionable QA, and editor briefs
+  segmentation/    word, take, and repeated-attempt grouping
+  transcription/   normalized transcription runtime
 ```
 
-Potem wyrenderuj drugą wersję z oryginalnego filmu:
+The scripts in `scripts/` are thin or backward-compatible entry points around these packages.
 
-```bash
-./venv/bin/python scripts/edit_video.py \
-  --padding 0.1 \
-  --repair-plan artifacts/repair_plan.json \
-  --output edited/edited_video_v2.mp4 \
-  --edit-decisions-output artifacts/edit_decisions_v2.json \
-  --quality-language pl \
-  --quality-transcript-output artifacts/edited_transcription_v2.json \
-  --quality-report-output artifacts/final_quality_report_v2.json
-```
+## Artifact and safety model
 
-Możesz też puścić ograniczoną pętlę automatyczną. Domyślnie robi maksymalnie v2 i v3, a potem zatrzymuje się do ręcznego review, jeśli QA nadal nie przejdzie:
+The pipeline never treats a rendered output as the next source. Each repair iteration uses the original recording and a structured repair plan. Every `edit_decisions*.json` contains a `timeline_map` that maps final intervals back to raw-media intervals.
 
-```bash
-./venv/bin/python scripts/auto_refine_video.py --quality-language pl
-```
+Smart Video Editor deliberately favors review over aggressive automation:
 
-Naprawy są konserwatywne:
+- local detectors produce evidence-backed candidates rather than unconditional cuts;
+- low-confidence or ambiguous LLM ranges are not applied automatically;
+- thought boundaries and source-word boundaries can block unsafe joins;
+- automatic repair requires actionable QA intent and source mapping;
+- refinement stops after a small, configured number of iterations;
+- applied, reviewed, and blocked decisions are preserved for inspection.
 
-- `force_drop_words` - wymusza usunięcie powtórzeń potwierdzonych przez QA,
-- `force_keep_interval` - przywraca krótki fragment audio między słowami, gdy QA wykryje brakujący łącznik,
-- `force_keep_words` - poszerza keep dla słowa rozpoznanego w raw, ale zgubionego w finalnej transkrypcji.
-
-Repair planner wykonuje tylko jawne akcje z raportu QA. Jeśli QA oznaczy miejsce jako `manual_review`, albo jeśli `force_drop` nie ma wysokiej pewności i mapowania na raw, plan naprawy zostawia to do ręcznego sprawdzenia.
-
-## 9. Brief dla montażysty
-
-JSON-y są dla skryptów. Dla osoby montującej wygeneruj prosty brief:
-
-```bash
-./venv/bin/python scripts/generate_editor_review.py --make-clips
-```
-
-Domyślnie skrypt wybiera najnowszy `final_quality_report_v*.json` i odpowiadający mu `edit_decisions_v*.json`.
-
-Wyniki:
+Generated working data is stored in:
 
 ```text
-artifacts/editor_review_v3.md
-artifacts/editor_review_v3.csv
-artifacts/editor_review_v3_clips/
+raw/        local source media
+artifacts/  transcripts, candidates, decisions, QA reports, and review briefs
+edited/     rendered videos
 ```
 
-Brief zawiera:
+## Tests
 
-- czas problemu w filmie edytowanym,
-- odpowiadający czas w raw,
-- akcję QA i status naprawy (`auto_repair_candidate`, `manual_review` albo blokada braku mapowania),
-- pewność QA i uzasadnienie,
-- kontekst słów z raw wokół problemu,
-- opis co brzmi podejrzanie,
-- sugestię co sprawdzić/poprawić,
-- krótkie klipy porównawcze edit/raw, jeśli użyjesz `--make-clips`.
-
-Więcej o polach briefu: `docs/editor_review_reports.md`.
-
-## 10. Typowy workflow
+Run the complete test suite:
 
 ```bash
-# 1. Wrzuć film do raw/
-
-# 2. Zrób transkrypcję word-level
-./venv/bin/python scripts/transcribe_video.py --language pl
-
-# 3. Przeanalizuj transkrypcję przez LLM
-./venv/bin/python scripts/analyze_transcript_llm.py
-
-# 4. Zmontuj film i uruchom QA po renderze
-./venv/bin/python scripts/edit_video.py --padding 0.05 --quality-language pl
-
-# 5. Jeśli QA zwróci fail/needs_review, uruchom ograniczoną pętlę naprawczą
-./venv/bin/python scripts/auto_refine_video.py --quality-language pl
-
-# 6. Jeśli po automatyce nadal jest needs_review, przygotuj brief dla montażysty
-./venv/bin/python scripts/generate_editor_review.py --make-clips
+python -m pytest -q
 ```
 
-Wynikowy film znajdziesz tutaj:
+The suite covers local detection, attempt grouping, planner safety, edit decision I/O, timeline mapping, actionable QA and repair contracts, editor reports, transcription helpers, CLI delegation, and script entry points.
 
-```text
-edited/edited_video.mp4
-```
+## Current limitations
 
-## 11. Pliki lokalne ignorowane przez Git
-
-Nie commituj:
-
-```text
-.env
-raw/
-artifacts/
-edited/
-venv/
-```
-
-Te ścieżki są w `.gitignore`.
+- Detection heuristics are currently tuned for Polish monologues.
+- API-backed stages require network access and may incur provider costs.
+- The tool focuses on content cuts, not captions, color grading, visual effects, or multi-camera editing.
+- Human review is recommended before publishing the final render.
