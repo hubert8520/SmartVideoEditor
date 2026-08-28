@@ -16,26 +16,26 @@ from smart_video_editor.timecode import seconds_to_timestamp, timestamp_to_secon
 
 
 SEVERITY_LABELS = {
-    "high": "WYSOKI",
-    "medium": "SREDNI",
-    "low": "NISKI",
+    "high": "HIGH",
+    "medium": "MEDIUM",
+    "low": "LOW",
 }
 
 CATEGORY_LABELS = {
-    "cut_word": "uciete slowo",
-    "repetition": "powtorzenie",
-    "dangling_thought": "urwana mysl",
-    "logic_gap": "problem logiczny",
+    "cut_word": "cut word",
+    "repetition": "repetition",
+    "dangling_thought": "dangling thought",
+    "logic_gap": "logic gap",
     "off_topic": "off-topic",
-    "noise_or_setup": "halas/setup",
-    "other": "inne",
+    "noise_or_setup": "noise/setup",
+    "other": "other",
 }
 
 ACTION_LABELS = {
-    "force_keep": "AUTO: przywroc fragment z raw",
-    "force_drop": "AUTO: usun fragment z raw",
-    "manual_review": "REVIEW: odsluchaj przed decyzja",
-    "no_auto_repair": "INFO: bez automatycznej naprawy",
+    "force_keep": "AUTO: restore the source fragment",
+    "force_drop": "AUTO: remove the source fragment",
+    "manual_review": "REVIEW: listen before deciding",
+    "no_auto_repair": "INFO: no automatic repair",
 }
 
 
@@ -72,7 +72,7 @@ def _window_seconds(window: dict[str, Any], key: str) -> float:
 
 def _completeness_summary(evidence: dict[str, Any]) -> str:
     pieces: list[str] = []
-    for label, source_key in (("wczesniejsza", "earlier"), ("pozniejsza", "later")):
+    for label, source_key in (("earlier", "earlier"), ("later", "later")):
         source = evidence.get(source_key)
         if not isinstance(source, dict):
             continue
@@ -81,7 +81,7 @@ def _completeness_summary(evidence: dict[str, Any]) -> str:
             continue
         markers = completeness.get("markers", [])
         if isinstance(markers, list):
-            marker_text = ", ".join(str(marker) for marker in markers) or "brak"
+            marker_text = ", ".join(str(marker) for marker in markers) or "none"
         else:
             marker_text = str(markers)
         pieces.append(
@@ -104,8 +104,8 @@ def _bad_marker_summary(evidence: dict[str, Any]) -> str:
     restart_text = str(restart.get("text", "")) if isinstance(restart, dict) else ""
     prefix_count = restart.get("prefix_word_count", 0) if isinstance(restart, dict) else 0
     pieces = [
-        f"marker={marker_text or 'brak'}",
-        f"failed_take={failed_text or 'brak'}",
+        f"marker={marker_text or 'none'}",
+        f"failed_take={failed_text or 'none'}",
         f"restart_confirmed={restart_confirmed}",
         f"restart_prefix_words={prefix_count}",
     ]
@@ -120,7 +120,7 @@ def _noise_summary(evidence: dict[str, Any]) -> str:
         return ""
     noise_text = str(noise.get("text", ""))
     pieces = [
-        f"noise={noise_text or 'brak'}",
+        f"noise={noise_text or 'none'}",
         f"overlaps_speech_context={bool(evidence.get('overlaps_speech_context'))}",
         f"previous_gap={evidence.get('previous_gap_seconds')}",
         f"next_gap={evidence.get('next_gap_seconds')}",
@@ -256,14 +256,14 @@ def actionability_label(
 def editor_instruction(issue: dict[str, Any], suggestion: dict[str, Any]) -> str:
     action = str(suggestion.get("action", "manual_review"))
     if action == "force_keep":
-        return "Sprawdz, czy raw zawiera brakujace slowo, lacznik albo krotki fragment sensu."
+        return "Check whether the source contains a missing word, connector, or short meaningful fragment."
     if action == "force_drop":
-        return "Sprawdz, czy wskazany fragment to rzeczywista powtorka, noise albo resztka setupu."
+        return "Check whether the selected fragment is a genuine repetition, isolated noise, or setup residue."
     if action == "manual_review":
-        return "Odsluchaj edit i raw przed decyzja; automatyczna naprawa nie jest bezpieczna."
+        return "Listen to the edit and source before deciding; an automatic repair is not safe."
     if action == "no_auto_repair":
-        return "Potraktuj jako informacje QA; nie ma prostej automatycznej naprawy keep/drop."
-    return str(issue.get("suggested_action", "Sprawdz recznie."))
+        return "Treat this as QA information; there is no safe automatic keep/drop repair."
+    return str(issue.get("suggested_action", "Inspect manually."))
 
 
 def build_editor_review_rows(
@@ -347,30 +347,30 @@ def write_editor_review_markdown(
 ) -> None:
     summary = review_summary(rows)
     lines = [
-        "# Brief montazowy",
+        "# Editor review brief",
         "",
-        f"Status QA: **{quality_report.get('status', '')}**",
+        f"QA status: **{quality_report.get('status', '')}**",
         "",
-        f"Film edytowany: `{edited_video_label}`",
-        f"Film raw: `{raw_video_label}`",
+        f"Edited video: `{edited_video_label}`",
+        f"Raw video: `{raw_video_label}`",
         "",
-        f"Liczba miejsc do sprawdzenia: **{summary['issues']}**",
-        f"Kandydaci do automatycznej naprawy: **{summary['auto_repair_candidates']}**",
-        f"Wymaga recznego review: **{summary['manual_review']}**",
-        f"Zmapowane na raw: **{summary['mapped_to_raw']}**",
+        f"Items to review: **{summary['issues']}**",
+        f"Automatic repair candidates: **{summary['auto_repair_candidates']}**",
+        f"Manual review required: **{summary['manual_review']}**",
+        f"Mapped to source: **{summary['mapped_to_raw']}**",
         "",
     ]
     notes = str(quality_report.get("overall_notes", "")).strip()
     if notes:
-        lines.extend(["## Ogolna uwaga QA", "", notes, ""])
+        lines.extend(["## Overall QA note", "", notes, ""])
 
     planner_evidence = planner_evidence or []
     if planner_evidence:
         lines.extend(
             [
-                "## Dowody plannera",
+                "## Planner evidence",
                 "",
-                "Te wpisy pokazuja, dlaczego lokalne kandydaty powtorek trafily do DROP/REVIEW/BLOCKED.",
+                "These entries explain why local candidates were classified as DROP, REVIEW, or BLOCKED.",
                 "",
             ]
         )
@@ -387,31 +387,31 @@ def write_editor_review_markdown(
     for row in rows:
         lines.extend(
             [
-                f"## {row['index']}. Priorytet {row['priority']} - {row['category']}",
+                f"## {row['index']}. {row['priority']} priority - {row['category']}",
                 "",
-                f"Akcja QA: `{row['action']}` - {row['action_label']}",
-                f"Status naprawy: `{row['actionability']}`",
-                f"Pewnosc QA: `{row['repair_confidence']}`",
+                f"QA action: `{row['action']}` - {row['action_label']}",
+                f"Repair status: `{row['actionability']}`",
+                f"QA confidence: `{row['repair_confidence']}`",
                 "",
-                f"Film edytowany: `{row['edited_range']}`",
-                f"Do odsluchu w edicie z marginesem: `{row['edited_compare_range']}`",
+                f"Edited video: `{row['edited_range']}`",
+                f"Edited comparison range: `{row['edited_compare_range']}`",
                 "",
-                "Raw do porownania:",
+                "Source comparison:",
             ]
         )
         if row["raw_compare_ranges"]:
             for raw_index, raw_range in enumerate(row["raw_compare_ranges"], start=1):
                 timeline_id = row["raw_ranges"][raw_index - 1]["timeline_id"]
-                lines.append(f"- `{raw_range}` (fragment raw/timeline #{timeline_id})")
+                lines.append(f"- `{raw_range}` (source timeline segment #{timeline_id})")
         else:
-            lines.append("- brak mapowania na raw; sprawdz recznie")
+            lines.append("- no source mapping available; inspect manually")
 
         raw_context = str(row.get("raw_context", "")).strip()
         if raw_context:
-            lines.extend(["", "Kontekst raw:", "", f"> {raw_context}"])
+            lines.extend(["", "Source context:", "", f"> {raw_context}"])
 
         if make_clips:
-            lines.extend(["", "Klipy porownawcze:"])
+            lines.extend(["", "Comparison clips:"])
             if row["edited_clip_path"]:
                 lines.append(f"- edit: `{row['edited_clip_path']}`")
             for raw_clip_path in row["raw_clip_paths"]:
@@ -420,19 +420,19 @@ def write_editor_review_markdown(
         lines.extend(
             [
                 "",
-                "Co brzmi podejrzanie:",
+                "What sounds suspicious:",
                 "",
                 row["description"],
                 "",
-                "Podejrzany tekst:",
+                "Affected text:",
                 "",
                 f"> {row['affected_text']}",
                 "",
-                "Uzasadnienie QA:",
+                "QA rationale:",
                 "",
                 row["repair_rationale"] or row["suggested_action"],
                 "",
-                "Instrukcja dla montazysty:",
+                "Instructions for the editor:",
                 "",
                 row["editor_instruction"],
                 "",
@@ -454,22 +454,22 @@ def write_editor_review_csv(
         writer = csv.DictWriter(
             handle,
             fieldnames=[
-                "nr",
-                "priorytet",
-                "kategoria",
-                "akcja_qa",
-                "status_naprawy",
-                "pewnosc_qa",
-                "film_edytowany_czas",
-                "film_edytowany_do_odsluchu",
-                "raw_do_porownania",
-                "kontekst_raw",
-                "co_brzmi_podejrzanie",
-                "podejrzany_tekst",
-                "uzasadnienie_qa",
-                "instrukcja_dla_montazysty",
-                "plik_edytowany",
-                "plik_raw",
+                "number",
+                "priority",
+                "category",
+                "qa_action",
+                "repair_status",
+                "qa_confidence",
+                "edited_video_time",
+                "edited_comparison_range",
+                "source_comparison_ranges",
+                "source_context",
+                "issue_description",
+                "affected_text",
+                "qa_rationale",
+                "editor_instruction",
+                "edited_file",
+                "source_file",
             ],
             delimiter=";",
         )
@@ -477,21 +477,21 @@ def write_editor_review_csv(
         for row in rows:
             writer.writerow(
                 {
-                    "nr": row["index"],
-                    "priorytet": row["priority"],
-                    "kategoria": row["category"],
-                    "akcja_qa": row["action"],
-                    "status_naprawy": row["actionability"],
-                    "pewnosc_qa": row["repair_confidence"],
-                    "film_edytowany_czas": row["edited_range"],
-                    "film_edytowany_do_odsluchu": row["edited_compare_range"],
-                    "raw_do_porownania": " | ".join(row["raw_compare_ranges"]),
-                    "kontekst_raw": row["raw_context"],
-                    "co_brzmi_podejrzanie": row["description"],
-                    "podejrzany_tekst": row["affected_text"],
-                    "uzasadnienie_qa": row["repair_rationale"] or row["suggested_action"],
-                    "instrukcja_dla_montazysty": row["editor_instruction"],
-                    "plik_edytowany": edited_video_label,
-                    "plik_raw": raw_video_label,
+                    "number": row["index"],
+                    "priority": row["priority"],
+                    "category": row["category"],
+                    "qa_action": row["action"],
+                    "repair_status": row["actionability"],
+                    "qa_confidence": row["repair_confidence"],
+                    "edited_video_time": row["edited_range"],
+                    "edited_comparison_range": row["edited_compare_range"],
+                    "source_comparison_ranges": " | ".join(row["raw_compare_ranges"]),
+                    "source_context": row["raw_context"],
+                    "issue_description": row["description"],
+                    "affected_text": row["affected_text"],
+                    "qa_rationale": row["repair_rationale"] or row["suggested_action"],
+                    "editor_instruction": row["editor_instruction"],
+                    "edited_file": edited_video_label,
+                    "source_file": raw_video_label,
                 }
             )

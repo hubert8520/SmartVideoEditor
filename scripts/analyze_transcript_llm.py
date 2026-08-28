@@ -13,13 +13,15 @@ from pathlib import Path
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(
+    os.environ.get("SMART_VIDEO_EDITOR_WORKSPACE", Path(__file__).resolve().parents[1])
+).expanduser().resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from smart_video_editor.detection.local import detect_local_candidates  # noqa: E402
 from smart_video_editor.llm.prompts import (  # noqa: E402
-    EDIT_ANALYSIS_SYSTEM_PROMPT_PL,
+    EDIT_ANALYSIS_SYSTEM_PROMPT,
     EDIT_ANALYSIS_USER_PROMPT_TEMPLATE,
 )
 from smart_video_editor.transcription.normalization import normalize_words_payload  # noqa: E402
@@ -31,7 +33,7 @@ DEFAULT_OUTPUT_PATH = ARTIFACTS_DIR / "llm_edit_decisions.json"
 DEFAULT_MODEL = "gpt-5.2"
 PLACEHOLDER_KEY_MARKERS = ("your-", "your_", "wklej", "tutaj", "...")
 TIMESTAMP_RE = re.compile(r"^\d{2}:\d{2}:\d{2}:\d{3}$")
-SYSTEM_PROMPT = EDIT_ANALYSIS_SYSTEM_PROMPT_PL
+SYSTEM_PROMPT = EDIT_ANALYSIS_SYSTEM_PROMPT
 USER_PROMPT_TEMPLATE = EDIT_ANALYSIS_USER_PROMPT_TEMPLATE
 
 

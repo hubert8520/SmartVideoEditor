@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_ENV = "SMART_VIDEO_EDITOR_WORKSPACE"
+PROJECT_ROOT = Path(
+    os.environ.get(WORKSPACE_ENV, Path(__file__).resolve().parents[1])
+).expanduser().resolve()
 RAW_DIR = PROJECT_ROOT / "raw"
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 EDITED_DIR = PROJECT_ROOT / "edited"

@@ -70,7 +70,7 @@ def test_editor_review_rows_include_actionability_and_raw_context():
     assert rows[0]["actionability"] == "auto_repair_candidate"
     assert rows[0]["raw_context"] == "dziala kampania"
     assert rows[0]["raw_compare_ranges"] == ["00:00:09:300 - 00:00:12:600"]
-    assert "brakujace slowo" in rows[0]["editor_instruction"]
+    assert "missing word" in rows[0]["editor_instruction"]
 
 
 def test_editor_review_rows_fallback_to_timeline_when_report_has_no_raw_ranges():
@@ -118,15 +118,15 @@ def test_editor_review_outputs_markdown_and_csv_with_repair_columns(tmp_path: Pa
     write_editor_review_csv(csv_path, rows, "edited/edited_video.mp4", "raw/source.mp4")
 
     markdown = markdown_path.read_text(encoding="utf-8")
-    assert "Akcja QA: `manual_review`" in markdown
-    assert "Kontekst raw" in markdown
-    assert "Wymaga recznego review: **1**" in markdown
+    assert "QA action: `manual_review`" in markdown
+    assert "Source context" in markdown
+    assert "Manual review required: **1**" in markdown
 
     with csv_path.open(encoding="utf-8", newline="") as handle:
         csv_rows = list(csv.DictReader(handle, delimiter=";"))
-    assert csv_rows[0]["akcja_qa"] == "manual_review"
-    assert csv_rows[0]["status_naprawy"] == "manual_review"
-    assert csv_rows[0]["kontekst_raw"] == "dziala kampania"
+    assert csv_rows[0]["qa_action"] == "manual_review"
+    assert csv_rows[0]["repair_status"] == "manual_review"
+    assert csv_rows[0]["source_context"] == "dziala kampania"
 
 
 def test_editor_review_markdown_can_include_planner_evidence(tmp_path: Path):
@@ -175,7 +175,7 @@ def test_editor_review_markdown_can_include_planner_evidence(tmp_path: Path):
 
     markdown = markdown_path.read_text(encoding="utf-8")
     assert evidence[0]["action"] == "REVIEW"
-    assert "Dowody plannera" in markdown
+    assert "Planner evidence" in markdown
     assert "later_attempt_also_incomplete_needs_review" in markdown
     assert "ends_with_incomplete_token" in markdown
 

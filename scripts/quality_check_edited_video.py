@@ -5,13 +5,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+PROJECT_ROOT = Path(
+    os.environ.get("SMART_VIDEO_EDITOR_WORKSPACE", Path(__file__).resolve().parents[1])
+).expanduser().resolve()
+SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 if str(SCRIPTS_DIR) not in sys.path:
@@ -20,7 +23,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import transcribe_video  # noqa: E402
 
 from smart_video_editor.llm.prompts import (  # noqa: E402
-    QUALITY_CHECK_SYSTEM_PROMPT_PL,
+    QUALITY_CHECK_SYSTEM_PROMPT,
     QUALITY_CHECK_USER_PROMPT_TEMPLATE,
 )
 from smart_video_editor.reporting.quality import (  # noqa: E402
@@ -270,7 +273,7 @@ def call_openai_quality(
     client = OpenAI(api_key=api_key)
     params: dict[str, Any] = {
         "model": model,
-        "instructions": QUALITY_CHECK_SYSTEM_PROMPT_PL,
+        "instructions": QUALITY_CHECK_SYSTEM_PROMPT,
         "input": QUALITY_CHECK_USER_PROMPT_TEMPLATE.format(
             qa_context_json=qa_context_json,
             transcript_json=transcript_json,

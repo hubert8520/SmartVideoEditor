@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smart-video-editor"
+version = "0.1.0"
+description = "AI-assisted CLI pipeline for editing talking-head videos"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.68.0",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.0.1",
+    "imageio-ffmpeg>=0.6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.urls]
+Repository = "https://github.com/hubert8520/SmartVideoEditor"
+
+[project.scripts]
+smart-video-editor = "smart_video_editor.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["smart_video_editor*", "scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

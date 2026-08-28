@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(
+    os.environ.get("SMART_VIDEO_EDITOR_WORKSPACE", Path(__file__).resolve().parents[1])
+).expanduser().resolve()
+SCRIPTS_DIR = Path(__file__).resolve().parent
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 EDITED_DIR = PROJECT_ROOT / "edited"
 DEFAULT_INITIAL_QUALITY_REPORT = ARTIFACTS_DIR / "final_quality_report.json"
@@ -106,7 +110,7 @@ def main() -> None:
         run_command(
             [
                 sys.executable,
-                "scripts/repair_from_quality_report.py",
+                str(SCRIPTS_DIR / "repair_from_quality_report.py"),
                 "--quality-report",
                 str(current_quality_report),
                 "--edit-decisions",
@@ -136,7 +140,7 @@ def main() -> None:
 
         edit_command = [
             sys.executable,
-            "scripts/edit_video.py",
+            str(SCRIPTS_DIR / "edit_video.py"),
             "--padding",
             str(args.padding),
             "--repair-plan",

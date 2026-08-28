@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from pathlib import Path
 
 from smart_video_editor.paths import PROJECT_ROOT
 
@@ -19,7 +20,7 @@ def run_quality_check(args: argparse.Namespace) -> None:
         print("Post-render quality check skipped.")
         return
 
-    script_path = PROJECT_ROOT / "scripts" / "quality_check_edited_video.py"
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "quality_check_edited_video.py"
     command = [
         sys.executable,
         str(script_path),

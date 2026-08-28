@@ -25,7 +25,9 @@ OPENAI_COARSE_TRANSCRIPTION_MODELS = {
     "gpt-4o-mini-transcribe",
 }
 MAX_UPLOAD_BYTES = 24 * 1024 * 1024
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(
+    os.environ.get("SMART_VIDEO_EDITOR_WORKSPACE", Path(__file__).resolve().parents[1])
+).expanduser().resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 RAW_DIR = PROJECT_ROOT / "raw"
