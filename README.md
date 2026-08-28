@@ -1,5 +1,7 @@
 # Smart Video Editor
 
+[![Tests](https://github.com/hubert8520/SmartVideoEditor/actions/workflows/tests.yml/badge.svg)](https://github.com/hubert8520/SmartVideoEditor/actions/workflows/tests.yml)
+
 An AI-assisted command-line pipeline that turns raw talking-head footage into a tighter, reviewable edit.
 
 Smart Video Editor combines word-level transcription, local candidate detection, semantic edit judgment, deterministic cut planning, FFmpeg rendering, and post-render quality assurance. It is designed for recordings where a speaker repeats takes, abandons sentences, uses filler words, or leaves setup noise and long pauses.
